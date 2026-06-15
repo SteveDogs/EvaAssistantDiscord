@@ -127,7 +127,7 @@ AUDIT_CATEGORY_ID=
 STATE_FILE=data/audit_state.json
 ENABLE_MEMBERS_INTENT=false
 ENABLE_MESSAGE_CONTENT_INTENT=false
-NICK_PREFIX_RULES=1389394678561902652=🌸
+NICK_PREFIX_RULES=1389394678561902652=🌸;1354908419567521986=🎲
 ```
 
 Если нужно складывать лог-каналы в уже существующую категорию Discord:
@@ -188,6 +188,12 @@ EVA умеет автоматически добавлять префиксы к
 
 ```env
 NICK_PREFIX_RULES=1389394678561902652=🌸;123456789012345678=🔥
+```
+
+Можно писать и через запятую:
+
+```env
+NICK_PREFIX_RULES=1389394678561902652=🌸,1354908419567521986=🎲
 ```
 
 Логика работы:
