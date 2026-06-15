@@ -36,6 +36,10 @@ class BotConfig:
     enable_members_intent: bool
     enable_message_content_intent: bool
     nickname_prefix_rules: dict[int, str]
+    chat_banter_enabled: bool
+    chat_banter_reply_chance: float
+    chat_banter_channel_cooldown_seconds: int
+    chat_banter_user_cooldown_seconds: int
 
 
 def _parse_bool_env(name: str, default: bool = False) -> bool:
@@ -43,6 +47,20 @@ def _parse_bool_env(name: str, default: bool = False) -> bool:
     if raw_value is None:
         return default
     return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _parse_float_env(name: str, default: float) -> float:
+    raw_value = os.getenv(name)
+    if raw_value is None or not raw_value.strip():
+        return default
+    return float(raw_value.strip().replace(",", "."))
+
+
+def _parse_int_env(name: str, default: int) -> int:
+    raw_value = os.getenv(name)
+    if raw_value is None or not raw_value.strip():
+        return default
+    return int(raw_value.strip())
 
 
 def _parse_nickname_prefix_rules(name: str) -> dict[int, str]:
@@ -87,6 +105,10 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
     enable_members_intent = _parse_bool_env("ENABLE_MEMBERS_INTENT", default=False)
     enable_message_content_intent = _parse_bool_env("ENABLE_MESSAGE_CONTENT_INTENT", default=False)
     nickname_prefix_rules = _parse_nickname_prefix_rules("NICK_PREFIX_RULES")
+    chat_banter_enabled = _parse_bool_env("CHAT_BANTER_ENABLED", default=True)
+    chat_banter_reply_chance = max(0.0, min(1.0, _parse_float_env("CHAT_BANTER_REPLY_CHANCE", default=0.35)))
+    chat_banter_channel_cooldown_seconds = max(0, _parse_int_env("CHAT_BANTER_CHANNEL_COOLDOWN_SECONDS", default=120))
+    chat_banter_user_cooldown_seconds = max(0, _parse_int_env("CHAT_BANTER_USER_COOLDOWN_SECONDS", default=300))
 
     return BotConfig(
         token=token,
@@ -97,4 +119,8 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
         enable_members_intent=enable_members_intent,
         enable_message_content_intent=enable_message_content_intent,
         nickname_prefix_rules=nickname_prefix_rules,
+        chat_banter_enabled=chat_banter_enabled,
+        chat_banter_reply_chance=chat_banter_reply_chance,
+        chat_banter_channel_cooldown_seconds=chat_banter_channel_cooldown_seconds,
+        chat_banter_user_cooldown_seconds=chat_banter_user_cooldown_seconds,
     )
