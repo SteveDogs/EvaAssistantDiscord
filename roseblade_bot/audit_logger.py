@@ -7,9 +7,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from datetime import datetime, timedelta
+from enum import Enum
 import io
 import json
-from pathlib import Path
 import random
 from typing import Any
 
@@ -17,205 +17,11 @@ import discord
 
 from roseblade_bot import EMBED_FOOTER
 from roseblade_bot.audit_definitions import CHANNEL_DEFINITIONS, EVENT_DEFINITIONS
+from roseblade_bot.phrases import PHRASES
 from roseblade_bot.storage import JsonStateStore
 
 
 EmbedField = tuple[str, str, bool]
-
-DEFAULT_EVA_LINES = (
-    "Ева всё записала и пошла дальше держать сервер в тонусе.",
-    "Сервер шумит, а Ева спокойно ведёт хронику.",
-    "Я всё вижу. Иногда даже слишком многое.",
-)
-
-NO_REASON_LINES = (
-    "Причину не оставили. Ева осуждающе молчит.",
-    "Причина где-то потерялась по дороге. Классика.",
-    "Без причины, зато с драмой. Сервер стабилен.",
-)
-
-FLAVOR_TEXTS: dict[str, tuple[str, ...]] = {
-    "member_banned": (
-        "Билет обратно пока не выписали.",
-        "Бан-лист пополнился, атмосфера стала чуть спокойнее.",
-        "Ева поставила печать и даже не удивилась.",
-    ),
-    "member_unbanned": (
-        "Амнистия случилась, но второй раз лучше не проверять.",
-        "Шлагбаум подняли, но взгляд Евы всё ещё настороженный.",
-        "Возврат оформлен, интрига началась заново.",
-    ),
-    "member_kicked": (
-        "Дверь нашлась подозрительно быстро.",
-        "Выход показали без экскурсии по серверу.",
-        "Ева записала кик с лёгким прищуром.",
-    ),
-    "member_timeout_applied": (
-        "Небольшая пауза на подумать ещё никому не вредила.",
-        "Чат отправил кого-то остывать.",
-        "Ева перевернула песочные часы и кивнула.",
-    ),
-    "member_timeout_removed": (
-        "Отсидка окончена, можно снова шевелить чат.",
-        "Пауза закончилась, клавиатура снова в деле.",
-        "Ева сняла ограничитель и сделала вид, что доверяет.",
-    ),
-    "channel_created": (
-        "Ещё одна точка для контента, суеты и великих споров.",
-        "Новый уголок сервера открыт официально.",
-        "Ева уже ждёт, кто первым устроит там драму.",
-    ),
-    "channel_deleted": (
-        "Архитектор с кувалдой снова в строю.",
-        "Канал пал в бою с перестройкой.",
-        "Ева моргнула, а канала уже нет.",
-    ),
-    "channel_updated": (
-        "Косметика, хирургия или лёгкий хаос. Решайте сами.",
-        "Канал переобули прямо на месте.",
-        "Ева одобрительно склонила голову: стало интереснее.",
-    ),
-    "channel_permissions_updated": (
-        "Кому можно, кому нельзя. Классика серверной жизни.",
-        "Доступы снова нарезали как праздничный салат.",
-        "Ева проверила списки и тихо хмыкнула.",
-    ),
-    "thread_created": (
-        "Тред родился, спор официально узаконен.",
-        "Ещё одна ветка для длинных мыслей и длиннее ссор.",
-        "Ева приготовилась считать аргументы поштучно.",
-    ),
-    "thread_deleted": (
-        "Дискуссию аккуратно прикопали.",
-        "Ветку прикрыли, но осадочек остался.",
-        "Ева поставила маленький крестик на этой истории.",
-    ),
-    "thread_updated": (
-        "Тема переобулась прямо на ходу.",
-        "Сюжет ветки слегка переписали.",
-        "Ева заметила подмену декораций сразу.",
-    ),
-    "role_created": (
-        "Ещё одна нашивка в коллекции сервера.",
-        "Новая роль вышла в свет при полном параде.",
-        "Ева уважает красивую иерархию. Иногда.",
-    ),
-    "role_deleted": (
-        "Минус одна корона в обороте.",
-        "Эта роль отправилась в музей былой славы.",
-        "Ева записала утрату без траурной музыки.",
-    ),
-    "role_updated": (
-        "Ливрею роли снова подкрутили.",
-        "Роль сменила стиль, статус или настроение.",
-        "Ева оценила апгрейд с лёгкой ухмылкой.",
-    ),
-    "message_deleted": (
-        "Следы зачищены, но EVA всё равно всё заметила.",
-        "Сообщение ушло в закат, а лог остался.",
-        "Ева видела это. Теперь видите и вы.",
-    ),
-    "message_edited": (
-        "Редактура подъехала. Старая версия нервно курит в сторонке.",
-        "Сообщение переписали так, будто первой версии не было.",
-        "Ева любит сравнивать черновик с финалом.",
-    ),
-    "member_joined": (
-        "Новый герой появился на локации.",
-        "Сервер пополнился ещё одной историей.",
-        "Ева уже оценивает вайб новичка издалека.",
-    ),
-    "member_left": (
-        "Тихий лив или эффектный уход. История умалчивает.",
-        "Кто-то закрыл дверь снаружи, а Ева это отметила.",
-        "Сервер стал чуть тише. Или это временно.",
-    ),
-    "nickname_changed": (
-        "Ребрендинг личности завершён.",
-        "Имя обновили, легенду оставили прежней.",
-        "Ева делает вид, что не путается в этих ребрендингах.",
-    ),
-    "member_role_added": (
-        "Новая нашивка пришита без наркоза.",
-        "Кому-то выдали свежий статус и каплю ответственности.",
-        "Ева отметила повышение в своей тетрадке.",
-    ),
-    "member_role_removed": (
-        "Погоны сняты, атмосфера стала интереснее.",
-        "Кого-то слегка облегчили по статусу.",
-        "Ева записала разжалование особенно аккуратным почерком.",
-    ),
-    "invite_created": (
-        "Дверь приоткрыли для новых лиц.",
-        "Кого-то явно ждут в гости.",
-        "Ева надеется, что зовут не в очередной хаос.",
-    ),
-    "invite_deleted": (
-        "Вход временно прикрыли.",
-        "Лишний пропуск убрали со стола.",
-        "Ева любит, когда двери открывают с умом.",
-    ),
-    "server_updated": (
-        "Кто-то крутил гайки прямо на проде.",
-        "Серверу снова подкрутили характер.",
-        "Ева слышит шорох конфига даже из соседнего канала.",
-    ),
-    "server_boosted": (
-        "Серверу выдали витаминов и моральной поддержки.",
-        "Буст залетел красиво, сервер расправил плечи.",
-        "Ева уважает тех, кто приносит энергии в дом.",
-    ),
-    "webhook_created": (
-        "Новый тихий автоматический житель поселился.",
-        "Вебхук заехал без лишнего шума.",
-        "Ева косится на автоматику, но пока терпит.",
-    ),
-    "webhook_deleted": (
-        "Автоматику слегка укоротили.",
-        "Один цифровой помощник отправился на покой.",
-        "Ева проследила, чтобы он ушёл без драмы.",
-    ),
-    "webhook_updated": (
-        "Вебхук сменил прическу и, возможно, характер.",
-        "Автоматику переодели и снова пустили в люди.",
-        "Ева не доверяет обновлённым вебхукам с первого взгляда.",
-    ),
-    "member_voice_joined": (
-        "Залетел в войс и принёс атмосферу.",
-        "Войс принял нового пассажира.",
-        "Ева поправила гарнитуру и всё отметила.",
-    ),
-    "member_voice_left": (
-        "Испарился из войса, как будто так и надо.",
-        "Войс стал тише на один голос.",
-        "Ева почти услышала хлопок двери.",
-    ),
-    "member_voice_switched": (
-        "Переезд по комнатам прошёл без грузчиков.",
-        "Кочевник войсов сменил локацию.",
-        "Ева любит цивилизованную миграцию по каналам.",
-    ),
-    "member_moved": (
-        "Такси по войсам снова работает без лицензии.",
-        "Перетаскивание прошло бодро и без объявления остановок.",
-        "Ева оценила технику манёвра.",
-    ),
-    "member_disconnected": (
-        "Штекер вынули решительно и без сантиментов.",
-        "Из войса вылетели без мягкой посадки.",
-        "Ева записала это как жёсткую, но чистую работу.",
-    ),
-    "member_voice_state_changed": (
-        "Кнопки в войсе пощёлкали, жизнь заиграла.",
-        "Войс немного поменял настроение.",
-        "Ева слышит даже нажатую кнопку mute.",
-    ),
-    "member_voice_moderation_changed": (
-        "Голосовая дисциплина наведена, настроение проверяется.",
-        "Войс-модерация щёлкнула по кнопкам и пошла дальше.",
-        "Ева поставила галочку напротив слова 'контроль'.",
-    ),
-}
 
 CASE_EVENT_KEYS = {
     "member_banned",
@@ -226,6 +32,8 @@ CASE_EVENT_KEYS = {
     "member_moved",
     "member_disconnected",
     "member_voice_moderation_changed",
+    "automod_action_timeout",
+    "automod_action_quarantined",
 }
 
 REASON_EVENT_KEYS = {
@@ -236,9 +44,18 @@ REASON_EVENT_KEYS = {
     "member_timeout_removed",
     "member_role_added",
     "member_role_removed",
+    "members_pruned",
     "member_moved",
     "member_disconnected",
     "member_voice_moderation_changed",
+    "bot_added",
+    "automod_rule_created",
+    "automod_rule_updated",
+    "automod_rule_deleted",
+    "automod_action_blocked",
+    "automod_action_flagged",
+    "automod_action_timeout",
+    "automod_action_quarantined",
 }
 
 IGNORED_CHANGE_ATTRS = {
@@ -246,8 +63,6 @@ IGNORED_CHANGE_ATTRS = {
     "overwrites",
     "permission_overwrites",
     "permissions",
-    "exempt_channels",
-    "exempt_roles",
     "applied_tags",
     "available_tags",
     "default_reaction_emoji",
@@ -285,6 +100,25 @@ CHANGE_LABELS = {
     "communication_disabled_until": "Тайм-аут до",
     "mute": "Микрофон выключен",
     "deaf": "Звук выключен",
+    "volume": "Громкость",
+    "emoji_name": "Эмодзи",
+    "available": "Доступен",
+    "status": "Статус",
+    "entity_type": "Тип события",
+    "scheduled_start_time": "Начало",
+    "scheduled_end_time": "Окончание",
+    "privacy_level": "Приватность",
+    "trigger_type": "Триггер",
+    "event_type": "Тип проверки",
+    "actions": "Действия",
+    "exempt_channels": "Исключённые каналы",
+    "exempt_roles": "Исключённые роли",
+    "default_thread_slowmode_delay": "Медленный режим в ветках",
+    "rtc_region": "Регион",
+    "video_quality_mode": "Качество видео",
+    "default_sort_order": "Порядок сортировки",
+    "default_forum_layout": "Вид форума",
+    "channel": "Канал",
 }
 
 
@@ -391,11 +225,11 @@ class AuditLogger:
 
     @staticmethod
     def pick_flavor(event_key: str) -> str:
-        return random.choice(FLAVOR_TEXTS.get(event_key, DEFAULT_EVA_LINES))
+        return random.choice(PHRASES.flavor_texts.get(event_key, PHRASES.default_eva_lines))
 
     @staticmethod
     def pick_missing_reason_line() -> str:
-        return random.choice(NO_REASON_LINES)
+        return random.choice(PHRASES.no_reason_lines)
 
     def should_log_event(
         self,
@@ -614,6 +448,18 @@ class AuditLogger:
             return value.display_name
         if isinstance(value, discord.Role):
             return value.name
+        if isinstance(value, discord.AutoModRule):
+            return value.name
+        if isinstance(value, discord.ScheduledEvent):
+            return value.name
+        if isinstance(value, discord.StageInstance):
+            return value.topic
+        if isinstance(value, discord.SoundboardSound):
+            return value.name
+        if isinstance(value, discord.GuildSticker):
+            return value.name
+        if isinstance(value, discord.Emoji):
+            return value.name
         if isinstance(value, (discord.Thread, discord.abc.GuildChannel)):
             return getattr(value, "name", f"ID {value.id}")
         if isinstance(value, discord.Webhook):
@@ -642,6 +488,18 @@ class AuditLogger:
             return "Участник"
         if isinstance(value, discord.Role):
             return "Роль"
+        if isinstance(value, discord.AutoModRule):
+            return "Правило"
+        if isinstance(value, discord.ScheduledEvent):
+            return "Событие"
+        if isinstance(value, discord.StageInstance):
+            return "Сцена"
+        if isinstance(value, discord.SoundboardSound):
+            return "Звук"
+        if isinstance(value, discord.GuildSticker):
+            return "Стикер"
+        if isinstance(value, discord.Emoji):
+            return "Эмодзи"
         if isinstance(value, discord.Thread):
             return "Ветка"
         if isinstance(value, discord.abc.GuildChannel):
@@ -679,6 +537,61 @@ class AuditLogger:
         return mapping.get(value, str(value))
 
     @staticmethod
+    def format_enum(value: Enum) -> str:
+        mapping = {
+            getattr(discord.EventStatus, "scheduled", None): "Запланировано",
+            getattr(discord.EventStatus, "active", None): "Активно",
+            getattr(discord.EventStatus, "completed", None): "Завершено",
+            getattr(discord.EventStatus, "canceled", None): "Отменено",
+            getattr(discord.EntityType, "stage_instance", None): "Сцена",
+            getattr(discord.EntityType, "voice", None): "Голосовой канал",
+            getattr(discord.EntityType, "external", None): "Внешнее событие",
+            getattr(discord.PrivacyLevel, "guild_only", None): "Только сервер",
+            getattr(discord.AutoModRuleTriggerType, "keyword", None): "Ключевые слова",
+            getattr(discord.AutoModRuleTriggerType, "harmful_link", None): "Опасные ссылки",
+            getattr(discord.AutoModRuleTriggerType, "spam", None): "Спам",
+            getattr(discord.AutoModRuleTriggerType, "keyword_preset", None): "Наборы слов",
+            getattr(discord.AutoModRuleTriggerType, "mention_spam", None): "Спам упоминаниями",
+            getattr(discord.AutoModRuleTriggerType, "member_profile", None): "Профиль участника",
+            getattr(discord.AutoModRuleEventType, "message_send", None): "Отправка сообщения",
+            getattr(discord.AutoModRuleEventType, "member_update", None): "Изменение профиля",
+            getattr(discord.AutoModRuleActionType, "block_message", None): "Блокировка сообщения",
+            getattr(discord.AutoModRuleActionType, "send_alert_message", None): "Сигнал в канал",
+            getattr(discord.AutoModRuleActionType, "timeout", None): "Тайм-аут",
+            getattr(discord.AutoModRuleActionType, "block_member_interactions", None): "Блокировка взаимодействий",
+            getattr(discord.StickerFormatType, "png", None): "PNG",
+            getattr(discord.StickerFormatType, "apng", None): "APNG",
+            getattr(discord.StickerFormatType, "lottie", None): "Lottie",
+            getattr(discord.StickerFormatType, "gif", None): "GIF",
+            getattr(discord.VideoQualityMode, "auto", None): "Авто",
+            getattr(discord.VideoQualityMode, "full", None): "Максимум",
+            getattr(discord.ForumLayoutType, "not_set", None): "По умолчанию",
+            getattr(discord.ForumLayoutType, "list_view", None): "Список",
+            getattr(discord.ForumLayoutType, "gallery_view", None): "Галерея",
+            getattr(discord.ForumOrderType, "latest_activity", None): "По активности",
+            getattr(discord.ForumOrderType, "creation_date", None): "По дате создания",
+        }
+        if value in mapping:
+            return mapping[value]
+        return value.name.replace("_", " ").capitalize()
+
+    @staticmethod
+    def format_automod_action(value: discord.AutoModRuleAction) -> str:
+        action_type = getattr(value, "type", None)
+        label = AuditLogger.format_enum(action_type) if isinstance(action_type, Enum) else str(action_type)
+        parts = [label]
+        channel_id = getattr(value, "channel_id", None)
+        duration = getattr(value, "duration", None)
+        custom_message = getattr(value, "custom_message", None)
+        if channel_id:
+            parts.append(f"канал `{channel_id}`")
+        if duration:
+            parts.append(f"длительность {duration}")
+        if custom_message:
+            parts.append(f"сообщение: {custom_message}")
+        return " • ".join(parts)
+
+    @staticmethod
     def format_change_value(value: Any) -> str:
         if value is None:
             return "Не задано"
@@ -688,6 +601,12 @@ class AuditLogger:
             return discord.utils.format_dt(value, style="F")
         if isinstance(value, discord.ChannelType):
             return AuditLogger.format_channel_type(value)
+        if isinstance(value, Enum):
+            return AuditLogger.format_enum(value)
+        if isinstance(value, discord.AutoModRuleAction):
+            return AuditLogger.format_automod_action(value)
+        if isinstance(value, discord.PartialEmoji):
+            return str(value) if str(value) else (value.name or "Эмодзи")
         if isinstance(value, int):
             return str(value)
         if isinstance(value, str):
@@ -712,6 +631,56 @@ class AuditLogger:
 
         if isinstance(value, discord.Role):
             lines = [f"**{value.name}**", value.mention]
+            if include_id:
+                lines.append(f"`{value.id}`")
+            return "\n".join(lines)
+
+        if isinstance(value, discord.AutoModRule):
+            lines = [f"**{value.name}**"]
+            if include_id:
+                lines.append(f"`{value.id}`")
+            return "\n".join(lines)
+
+        if isinstance(value, discord.ScheduledEvent):
+            lines = [f"**{value.name}**"]
+            if value.url:
+                lines.append(value.url)
+            if include_id:
+                lines.append(f"`{value.id}`")
+            return "\n".join(lines)
+
+        if isinstance(value, discord.StageInstance):
+            lines = [f"**{value.topic}**"]
+            channel = getattr(value, "channel", None)
+            if channel is not None:
+                lines.append(AuditLogger.format_channel(channel))
+            if include_id:
+                lines.append(f"`{value.id}`")
+            return "\n".join(lines)
+
+        if isinstance(value, discord.SoundboardSound):
+            lines = [f"**{value.name}**"]
+            emoji = getattr(value, "emoji", None)
+            if emoji:
+                lines.append(str(emoji))
+            if include_id:
+                lines.append(f"`{value.id}`")
+            return "\n".join(lines)
+
+        if isinstance(value, discord.GuildSticker):
+            lines = [f"**{value.name}**"]
+            emoji = getattr(value, "emoji", None)
+            if emoji:
+                lines.append(emoji)
+            if include_id:
+                lines.append(f"`{value.id}`")
+            return "\n".join(lines)
+
+        if isinstance(value, discord.Emoji):
+            lines = [f"**{value.name}**"]
+            preview = str(value)
+            if preview:
+                lines.append(preview)
             if include_id:
                 lines.append(f"`{value.id}`")
             return "\n".join(lines)
@@ -755,6 +724,9 @@ class AuditLogger:
 
         if isinstance(value, datetime):
             return discord.utils.format_dt(value, style="F")
+
+        if isinstance(value, Enum):
+            return AuditLogger.format_enum(value)
 
         if isinstance(value, str):
             return value
