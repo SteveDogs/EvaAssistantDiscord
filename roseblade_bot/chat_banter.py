@@ -18,6 +18,14 @@ def _as_text_tuple(values: object) -> tuple[str, ...]:
     return tuple(str(value).strip() for value in values if str(value).strip())
 
 
+def _normalize_markers(values: object) -> tuple[str, ...]:
+    return tuple(
+        normalized
+        for normalized in (normalize_text(str(value)) for value in values if str(value).strip())
+        if normalized
+    )
+
+
 def normalize_text(value: str) -> str:
     lowered = value.casefold()
     translation = str.maketrans(
@@ -45,6 +53,16 @@ def _compile_roots(roots: tuple[str, ...]) -> tuple[re.Pattern[str], ...]:
     return tuple(patterns)
 
 
+def _compile_exact_terms(terms: tuple[str, ...]) -> tuple[re.Pattern[str], ...]:
+    patterns = []
+    for term in terms:
+        normalized_term = normalize_text(term)
+        if not normalized_term:
+            continue
+        patterns.append(re.compile(rf"(?iu)\b{re.escape(normalized_term)}\b"))
+    return tuple(patterns)
+
+
 @dataclass(frozen=True, slots=True)
 class ChatBanterPack:
     trigger_roots: tuple[str, ...]
@@ -58,7 +76,10 @@ class ChatBanterPack:
     strict_openers: tuple[str, ...]
     strict_redirects: tuple[str, ...]
     strict_afterthoughts: tuple[str, ...]
+    strict_exact_terms: tuple[str, ...]
+    strict_phrase_markers: tuple[str, ...]
     strict_patterns: tuple[re.Pattern[str], ...]
+    strict_exact_patterns: tuple[re.Pattern[str], ...]
 
     @property
     def reply_variants_count(self) -> int:
@@ -70,6 +91,10 @@ class ChatBanterPack:
         normalized = normalize_text(text)
         if not normalized:
             return None
+        if any(pattern.search(normalized) for pattern in self.strict_exact_patterns):
+            return "strict"
+        if any(marker in normalized for marker in self.strict_phrase_markers):
+            return "strict"
         if any(pattern.search(normalized) for pattern in self.strict_patterns):
             return "strict"
         if any(pattern.search(normalized) for pattern in self.patterns):
@@ -172,7 +197,10 @@ _FALLBACK_PACK = ChatBanterPack(
         "С этим у меня разговор короткий.",
         "И да, это не шутка.",
     ),
+    strict_exact_terms=("жид", "жиды", "жидом", "жиды", "жыд", "жыды", "kike", "heeb"),
+    strict_phrase_markers=("dirty jew", "kill jew", "gas the jew", "hate jew", "бей евр", "бей жид"),
     strict_patterns=_compile_roots(("гитлер", "нацист", "nazi", "hitler", "nigger")),
+    strict_exact_patterns=_compile_exact_terms(("жид", "жиды", "жидом", "жиды", "жыд", "жыды", "kike", "heeb")),
 )
 
 
@@ -196,12 +224,15 @@ def load_chat_banter(locale: str = "chat_banter") -> ChatBanterPack:
     strict_openers = _as_text_tuple(payload.get("strict_openers"))
     strict_redirects = _as_text_tuple(payload.get("strict_redirects"))
     strict_afterthoughts = _as_text_tuple(payload.get("strict_afterthoughts"))
+    strict_exact_terms = _as_text_tuple(payload.get("strict_exact_terms"))
+    strict_phrase_markers = _normalize_markers(payload.get("strict_phrase_markers"))
 
     if not trigger_roots:
         return _FALLBACK_PACK
     if not direct_replies and not (openers and redirects):
         return _FALLBACK_PACK
-    if strict_trigger_roots and not strict_direct_replies and not (strict_openers and strict_redirects):
+    strict_is_configured = bool(strict_trigger_roots or strict_exact_terms or strict_phrase_markers)
+    if strict_is_configured and not strict_direct_replies and not (strict_openers and strict_redirects):
         return _FALLBACK_PACK
 
     return ChatBanterPack(
@@ -216,7 +247,10 @@ def load_chat_banter(locale: str = "chat_banter") -> ChatBanterPack:
         strict_openers=strict_openers,
         strict_redirects=strict_redirects,
         strict_afterthoughts=strict_afterthoughts,
+        strict_exact_terms=strict_exact_terms,
+        strict_phrase_markers=strict_phrase_markers,
         strict_patterns=_compile_roots(strict_trigger_roots),
+        strict_exact_patterns=_compile_exact_terms(strict_exact_terms),
     )
 
 
