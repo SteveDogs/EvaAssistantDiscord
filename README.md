@@ -2,37 +2,42 @@
 
 ![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?style=flat-square&logo=python&logoColor=white)
 ![discord.py](https://img.shields.io/badge/discord.py-2.7%2B-5865F2?style=flat-square&logo=discord&logoColor=white)
-![Status](https://img.shields.io/badge/status-active%20development-111111?style=flat-square)
-![Brand](https://img.shields.io/badge/Steve%20Dogs-Studio-E84A5F?style=flat-square)
+![Статус](https://img.shields.io/badge/статус-активная%20разработка-111111?style=flat-square)
+![Бренд](https://img.shields.io/badge/Steve%20Dogs-Studio-E84A5F?style=flat-square)
 
-EVA Assistant is a Discord audit and moderation logging bot designed for communities that want readable, stylish, category-based server logs instead of raw technical noise.
+**EVA Assistant** — это Discord-бот для аудит-логов и модерации, созданный для серверов, которым нужны не сухие технические простыни, а аккуратные, читаемые и красиво оформленные логи.
 
-Built for real moderation workflows:
+Бот ориентирован на реальные задачи модерации:
 
-- clean audit channels created automatically
-- voice moderation and member movement tracking
-- readable message delete and edit logs
-- role assignment logging in a dedicated channel
-- branded embed styling with a custom personality layer
-- slash-command based setup and administration
+- автоматически создаёт структуру аудит-каналов
+- разносит события по отдельным логическим разделам
+- показывает, кто именно выполнил действие и кого оно затронуло
+- ведёт логи голосовой модерации и перемещений по войсам
+- логирует удаление и редактирование сообщений
+- поддерживает фирменный стиль и более живую подачу в embed-логах
 
-## Why EVA
+## Зачем EVA
 
-Most audit bots dump too much junk into embeds: IDs everywhere, dry phrasing, and barely readable event cards.
+Большинство аудит-ботов для Discord страдают от одних и тех же проблем:
 
-EVA Assistant focuses on:
+- слишком много мусорной технической информации
+- сухие и роботизированные формулировки
+- плохо читаемые embeds
+- свалка всех событий в один канал
 
-- human-readable logs first
-- moderator identity and target visibility
-- structured channels by event family
-- better Discord-native UX through embeds
-- branded tone instead of robotic system text
+**EVA Assistant** делает упор на другое:
 
-## Feature Set
+- читаемость в первую очередь
+- понятное разделение логов по категориям
+- удобство для администрации и модераторов
+- аккуратный Discord-native UI/UX
+- живой фирменный стиль вместо бездушного системного текста
 
-### Audit channels
+## Возможности
 
-EVA can automatically create and maintain a structured logging category with separate channels for:
+### Автосоздание аудит-каналов
+
+EVA умеет автоматически создать и поддерживать структуру логов с отдельными текстовыми каналами:
 
 - `администрация`
 - `выдача-ролей`
@@ -47,33 +52,38 @@ EVA can automatically create and maintain a structured logging category with sep
 - `сервер`
 - `вебхуки`
 
-### Logged events
+### Какие события логируются
 
-- bans, unbans, kicks, and timeouts
-- member join, leave, nickname changes, and boosts
-- role assignment and role removal for members
-- role create, update, and delete
-- channel create, update, delete, and permission changes
-- thread create, update, and delete
-- message delete, bulk delete, and edit events
-- voice join, leave, self-state changes, moves, disconnects, and voice moderation
-- invite create and delete
-- webhook create, update, and delete
-- guild-level setting changes
+- баны, разбаны, кики и тайм-ауты
+- вход и выход участников
+- смена никнейма
+- бусты сервера
+- выдача и снятие ролей у участников
+- создание, изменение и удаление ролей
+- создание, изменение и удаление каналов
+- создание, изменение и удаление веток
+- изменение прав канала
+- удаление, массовое удаление и редактирование сообщений
+- вход в войс, выход из войса и самостоятельное переключение между каналами
+- модераторское перемещение и отключение участников из войса
+- voice state и voice moderation события
+- создание, изменение и удаление вебхуков
+- создание и удаление приглашений
+- общие изменения сервера
 
-### Moderation UX
+### Что видно в логах
 
-EVA tries to show:
+EVA старается показывать только полезное:
 
-- who performed the action
-- who was affected
-- where it happened
-- what actually changed
-- the audit reason when Discord provides it
+- кто выполнил действие
+- кого затронуло действие
+- где это произошло
+- что именно изменилось
+- причину из Audit Log, если Discord её отдал
 
-## Quick Start
+## Быстрый старт
 
-### 1. Install dependencies
+### 1. Установка зависимостей
 
 ```powershell
 python -m venv .venv
@@ -81,11 +91,11 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-### 2. Configure environment
+### 2. Настройка окружения
 
-Create `.env` from `.env.example`.
+Создай `.env` на основе `.env.example`.
 
-Key values:
+Основные переменные:
 
 ```env
 DISCORD_TOKEN=your_bot_token_here
@@ -97,19 +107,21 @@ ENABLE_MEMBERS_INTENT=false
 ENABLE_MESSAGE_CONTENT_INTENT=false
 ```
 
-If you want logs to be created inside an existing Discord category, fill in:
+Если нужно складывать лог-каналы в уже существующую категорию Discord:
 
 ```env
 AUDIT_CATEGORY_ID=123456789012345678
 ```
 
-### 3. Run the bot
+### 3. Запуск
 
 ```powershell
 python main.py
 ```
 
-## Required Discord Permissions
+## Права бота в Discord
+
+Обязательные:
 
 - `View Audit Log`
 - `Manage Channels`
@@ -118,7 +130,7 @@ python main.py
 - `Send Messages`
 - `Embed Links`
 
-Depending on how you use EVA, these are also recommended:
+Рекомендуемые:
 
 - `Manage Roles`
 - `Move Members`
@@ -127,29 +139,29 @@ Depending on how you use EVA, these are also recommended:
 
 ## Privileged Intents
 
-For full coverage in Discord Developer Portal, enable:
+Для полного покрытия логов в Discord Developer Portal желательно включить:
 
 - `Server Members Intent`
 - `Message Content Intent`
 
-Then mirror that in `.env`:
+После этого нужно отразить это в `.env`:
 
 ```env
 ENABLE_MEMBERS_INTENT=true
 ENABLE_MESSAGE_CONTENT_INTENT=true
 ```
 
-Without these intents, EVA still works in a reduced mode, but some logs may be limited by Discord itself.
+Без этих intents EVA всё равно работает, но часть событий будет ограничена самим Discord.
 
-## Slash Commands
+## Slash-команды
 
-- `/audit_setup` - create and sync audit channels
-- `/audit_status` - show current guild audit configuration
-- `/audit_events` - list event keys
-- `/audit_set_color` - set a custom color for an event
-- `/audit_toggle` - enable or disable a specific event
-- `/audit_bind` - bind a log group to a specific text channel
-- `/audit_export` - export recent audit history
+- `/audit_setup` — создать и синхронизировать аудит-каналы
+- `/audit_status` — показать текущую конфигурацию
+- `/audit_events` — вывести список ключей событий
+- `/audit_set_color` — задать цвет для конкретного события
+- `/audit_toggle` — включить или выключить событие
+- `/audit_bind` — привязать логическую группу к конкретному каналу
+- `/audit_export` — выгрузить историю логов
 - `/audit_ignore_channel`
 - `/audit_unignore_channel`
 - `/audit_ignore_category`
@@ -159,7 +171,7 @@ Without these intents, EVA still works in a reduced mode, but some logs may be l
 - `/audit_ignore_role`
 - `/audit_unignore_role`
 
-## Project Structure
+## Структура проекта
 
 ```text
 main.py
@@ -174,25 +186,25 @@ roseblade_bot/
 requirements.txt
 ```
 
-## Branding
+## Брендинг
 
-EVA Assistant is a branded moderation utility by Steve Dogs Studio.
+**EVA Assistant** — фирменный moderation/audit проект от **Steve Dogs Studio**.
 
-- Website: [steve.dog](https://steve.dog)
+- Сайт: [steve.dog](https://steve.dog)
 - Telegram: [t.me/stevedog](https://t.me/stevedog)
-- Repository: [SteveDogs/EvaAssistantDiscord](https://github.com/SteveDogs/EvaAssistantDiscord)
+- GitHub: [SteveDogs/EvaAssistantDiscord](https://github.com/SteveDogs/EvaAssistantDiscord)
 
-## Roadmap
+## Дорожная карта
 
-- audit style presets for different server vibes
-- richer moderation reason handling
-- export improvements
-- optional dashboard / web control panel
-- deeper anti-spam and moderation utilities
+- стили поведения и настроения Евы
+- более гибкие режимы тона логов
+- улучшение выгрузки истории
+- веб-панель или административный интерфейс
+- дополнительные moderation и anti-spam фишки
 
-## Copyright
+## Копирайт
 
 Copyright (c) 2026 Steve Dogs Studio.
 
-This repository includes branded source code and public project materials for EVA Assistant.
-If a separate `LICENSE` file is not present, all rights remain with the author by default.
+В этом репозитории размещены исходный код, брендированные материалы и публичная витрина проекта EVA Assistant.
+Если отдельный `LICENSE` не добавлен, все права по умолчанию остаются у автора.
