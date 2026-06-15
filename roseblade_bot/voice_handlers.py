@@ -149,8 +149,7 @@ async def handle_on_voice_state_update(
             cog._stop_session(cog._stream_sessions, member)
             cog._stop_session(cog._camera_sessions, member)
             entry = await cog.find_member_disconnect_entry(member, max_age_seconds=10)
-            if entry is not None and not cog.audit.was_recent(guild.id, "member_disconnected", member.id, seconds=8):
-                cog.audit.remember_recent(guild.id, "member_disconnected", member.id)
+            if entry is not None:
                 await cog._log_voice_session_finished(
                     member,
                     before.channel,
@@ -182,6 +181,7 @@ async def handle_on_voice_state_update(
                     target=member,
                     actor=entry.user,
                     source_channel=before.channel,
+                    audit_entry_id=getattr(entry, "id", None),
                 )
                 return
             await cog._log_voice_session_finished(

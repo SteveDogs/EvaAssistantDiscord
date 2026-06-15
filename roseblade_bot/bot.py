@@ -68,7 +68,7 @@ class AuditCog(commands.Cog):
         self._chat_banter_last_channel_reply: dict[tuple[int, int], datetime] = {}
         self._chat_banter_last_user_reply: dict[tuple[int, int], datetime] = {}
         self._chat_banter_last_channel_text: dict[tuple[int, int], str] = {}
-        self._protected_voice_guard_recent: dict[tuple[int, int, int], datetime] = {}
+        self._protected_voice_guard_recent: dict[tuple[int, int, int, int | None], datetime] = {}
         self.audit = AuditLogger(
             store=store,
             default_category_name=config.audit_category_name,
@@ -515,6 +515,7 @@ class AuditCog(commands.Cog):
         target: discord.Member,
         actor: discord.abc.User | None,
         source_channel: discord.VoiceChannel | discord.StageChannel | None,
+        audit_entry_id: int | None = None,
     ) -> None:
         if actor is None or actor.bot:
             return
@@ -527,10 +528,11 @@ class AuditCog(commands.Cog):
         if actor.id in protected_ids or actor.id == target.id or self.bot.user is None or actor.id == self.bot.user.id:
             return
 
-        key = (target.guild.id, target.id, actor.id)
+        key = (target.guild.id, target.id, actor.id, audit_entry_id)
         stamp = self._protected_voice_guard_recent.get(key)
         now = discord.utils.utcnow()
-        if stamp is not None and now - stamp <= timedelta(seconds=20):
+        cooldown_seconds = 5 if audit_entry_id is None else 120
+        if stamp is not None and now - stamp <= timedelta(seconds=cooldown_seconds):
             return
         self._protected_voice_guard_recent[key] = now
 
