@@ -376,6 +376,29 @@ class AuditCog(commands.Cog):
 
         return fallback
 
+    async def find_member_disconnect_entry(
+        self,
+        member: discord.Member,
+        *,
+        max_age_seconds: int = 10,
+    ) -> discord.AuditLogEntry | None:
+        deadline = discord.utils.utcnow() - timedelta(seconds=max_age_seconds)
+        fallback: discord.AuditLogEntry | None = None
+        try:
+            async for entry in member.guild.audit_logs(limit=10, action=discord.AuditLogAction.member_disconnect):
+                if entry.created_at < deadline:
+                    break
+                if getattr(entry.target, "id", None) == member.id:
+                    return entry
+                extra = getattr(entry, "extra", None)
+                extra_count = int(getattr(extra, "count", 0) or 0)
+                if fallback is None and extra_count == 1:
+                    fallback = entry
+        except (discord.Forbidden, discord.HTTPException):
+            return None
+
+        return fallback
+
     async def fetch_message_excerpt(
         self,
         channel: discord.TextChannel | discord.Thread,
