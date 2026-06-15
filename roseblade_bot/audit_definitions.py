@@ -50,6 +50,11 @@ CHANNEL_DEFINITIONS: dict[str, ChannelDefinition] = {
         name="войс",
         description="Входы, выходы и изменения голосового состояния.",
     ),
+    "voice_sessions": ChannelDefinition(
+        key="voice_sessions",
+        name="войс-длительность",
+        description="Сколько участники просидели в голосовых каналах и с кем именно.",
+    ),
     "voice_moderation": ChannelDefinition(
         key="voice_moderation",
         name="войс-модерация",
@@ -180,6 +185,13 @@ EVENT_DEFINITIONS: dict[str, EventDefinition] = {
         "voice",
         0x3498DB,
         "🔀",
+    ),
+    "member_voice_session_finished": EventDefinition(
+        "member_voice_session_finished",
+        "Сессия в войсе завершена",
+        "voice_sessions",
+        0x16A085,
+        "⏱️",
     ),
     "member_moved": EventDefinition(
         "member_moved",
