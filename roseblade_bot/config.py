@@ -34,6 +34,7 @@ class BotConfig:
     state_file: Path
     enable_members_intent: bool
     enable_message_content_intent: bool
+    nickname_prefix_rules: dict[int, str]
 
 
 def _parse_bool_env(name: str, default: bool = False) -> bool:
@@ -41,6 +42,29 @@ def _parse_bool_env(name: str, default: bool = False) -> bool:
     if raw_value is None:
         return default
     return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _parse_nickname_prefix_rules(name: str) -> dict[int, str]:
+    raw_value = os.getenv(name, "").strip()
+    if not raw_value:
+        return {}
+
+    rules: dict[int, str] = {}
+    for chunk in raw_value.split(";"):
+        entry = chunk.strip()
+        if not entry:
+            continue
+        if "=" not in entry:
+            raise RuntimeError(
+                f"{name} has invalid entry '{entry}'. Use format ROLE_ID=PREFIX;ROLE_ID=PREFIX."
+            )
+        role_id_raw, prefix_raw = entry.split("=", 1)
+        role_id = int(role_id_raw.strip())
+        prefix = prefix_raw.strip()
+        if not prefix:
+            continue
+        rules[role_id] = prefix
+    return rules
 
 
 def load_config(base_dir: Path | None = None) -> BotConfig:
@@ -61,6 +85,7 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
     state_file = (root_dir / state_file_raw).resolve()
     enable_members_intent = _parse_bool_env("ENABLE_MEMBERS_INTENT", default=False)
     enable_message_content_intent = _parse_bool_env("ENABLE_MESSAGE_CONTENT_INTENT", default=False)
+    nickname_prefix_rules = _parse_nickname_prefix_rules("NICK_PREFIX_RULES")
 
     return BotConfig(
         token=token,
@@ -70,4 +95,5 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
         state_file=state_file,
         enable_members_intent=enable_members_intent,
         enable_message_content_intent=enable_message_content_intent,
+        nickname_prefix_rules=nickname_prefix_rules,
     )

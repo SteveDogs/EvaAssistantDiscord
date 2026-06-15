@@ -483,6 +483,7 @@ class AuditCog(commands.Cog):
         self._voice_sessions: dict[tuple[int, int], datetime] = {}
         self._stream_sessions: dict[tuple[int, int], datetime] = {}
         self._camera_sessions: dict[tuple[int, int], datetime] = {}
+        self._managed_nickname_updates: dict[tuple[int, int], datetime] = {}
         self.audit = AuditLogger(
             store=store,
             default_category_name=config.audit_category_name,
@@ -506,6 +507,100 @@ class AuditCog(commands.Cog):
 
     def _stop_session(self, bucket: dict[tuple[int, int], datetime], member: discord.Member) -> str | None:
         return _format_duration(bucket.pop(self._session_key(member), None))
+
+    def _remember_managed_nickname_update(self, member: discord.Member) -> None:
+        self._managed_nickname_updates[self._session_key(member)] = discord.utils.utcnow()
+
+    def _was_recent_managed_nickname_update(self, member: discord.Member, *, seconds: int = 10) -> bool:
+        stamp = self._managed_nickname_updates.get(self._session_key(member))
+        if stamp is None:
+            return False
+        return discord.utils.utcnow() - stamp <= timedelta(seconds=seconds)
+
+    @staticmethod
+    def _default_member_name(member: discord.Member) -> str:
+        return (member.global_name or member.name).strip()
+
+    def _configured_prefixes(self, member: discord.Member) -> list[str]:
+        configured_roles = [
+            role
+            for role in member.roles
+            if role.id in self.config.nickname_prefix_rules and not role.is_default()
+        ]
+        configured_roles.sort(key=lambda role: (-role.position, role.id))
+        prefixes: list[str] = []
+        for role in configured_roles:
+            prefix = self.config.nickname_prefix_rules[role.id]
+            if prefix not in prefixes:
+                prefixes.append(prefix)
+        return prefixes
+
+    def _strip_known_prefixes(self, value: str) -> str:
+        cleaned = value.strip()
+        known_prefixes = sorted(set(self.config.nickname_prefix_rules.values()), key=len, reverse=True)
+        changed = True
+        while changed and cleaned:
+            changed = False
+            for prefix in known_prefixes:
+                if cleaned.startswith(f"{prefix} "):
+                    cleaned = cleaned[len(prefix) + 1 :].lstrip()
+                    changed = True
+                    break
+                if cleaned.startswith(prefix):
+                    cleaned = cleaned[len(prefix) :].lstrip()
+                    changed = True
+                    break
+        return cleaned.strip()
+
+    def _truncate_nickname(self, nickname: str) -> str:
+        return nickname[:32].rstrip()
+
+    def _desired_member_nickname(self, member: discord.Member) -> str | None:
+        prefixes = self._configured_prefixes(member)
+        raw_current = member.nick or self._default_member_name(member)
+        base_name = self._strip_known_prefixes(raw_current) or self._default_member_name(member)
+
+        if prefixes:
+            prefix_text = " ".join(prefixes)
+            desired = self._truncate_nickname(f"{prefix_text} {base_name}".strip())
+            return desired or self._truncate_nickname(prefix_text)
+
+        if member.nick is None:
+            return None
+
+        stripped_nick = self._strip_known_prefixes(member.nick)
+        if not stripped_nick:
+            return None
+        if stripped_nick == self._default_member_name(member):
+            return None
+        return self._truncate_nickname(stripped_nick)
+
+    async def enforce_member_nickname(self, member: discord.Member) -> bool:
+        if member.bot or not self.config.nickname_prefix_rules:
+            return False
+        me = member.guild.me
+        if me is None or not me.guild_permissions.manage_nicknames:
+            return False
+        if member == member.guild.owner:
+            return False
+        if member.top_role >= me.top_role:
+            return False
+
+        desired_nick = self._desired_member_nickname(member)
+        if desired_nick == member.nick:
+            return False
+        if desired_nick is None and member.nick is None:
+            return False
+
+        try:
+            self._remember_managed_nickname_update(member)
+            await member.edit(
+                nick=desired_nick,
+                reason="EVA Assistant: синхронизация префикса ника по ролям",
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            return False
+        return True
 
     @staticmethod
     def _format_voice_company(channel: discord.VoiceChannel | discord.StageChannel | None, member: discord.Member) -> str:
@@ -609,6 +704,9 @@ class AuditCog(commands.Cog):
                 pass
 
         await self.audit.ensure_guild_setup(guild, category_id=self.config.audit_category_id)
+        if self.config.enable_members_intent and self.config.nickname_prefix_rules:
+            for member in guild.members:
+                await self.enforce_member_nickname(member)
         self._bootstrapped_guild_ids.add(guild.id)
 
     async def find_message_delete_entry(
@@ -713,6 +811,18 @@ class AuditCog(commands.Cog):
             fields.append(("Ответ на", reference, False))
         return fields
 
+    async def resolve_member(self, guild: discord.Guild, value: Any) -> discord.Member | None:
+        member_id = getattr(value, "id", None)
+        if member_id is None:
+            return None
+        member = guild.get_member(member_id)
+        if member is not None:
+            return member
+        try:
+            return await guild.fetch_member(member_id)
+        except (discord.Forbidden, discord.HTTPException):
+            return None
+
     @app_commands.command(name="audit_setup", description="Создать категорию и каналы для аудита")
     @app_commands.describe(category_name="Название категории аудита")
     @app_commands.checks.has_permissions(administrator=True)
@@ -752,6 +862,7 @@ class AuditCog(commands.Cog):
             f" members={_bool_label(self.config.enable_members_intent)},"
             f" message_content={_bool_label(self.config.enable_message_content_intent)}"
         )
+        lines.append(f"Префиксы ников: `{len(self.config.nickname_prefix_rules)}`")
         ignored = saved["ignored"]
         lines.append(
             "Ignore:"
@@ -1199,6 +1310,7 @@ class AuditCog(commands.Cog):
             added_roles = list(getattr(entry.after, "roles", []) or [])
             removed_roles = list(getattr(entry.before, "roles", []) or [])
             target_id = getattr(target, "id", 0)
+            target_member = await self.resolve_member(guild, target)
 
             if added_roles:
                 if target_id:
@@ -1219,6 +1331,8 @@ class AuditCog(commands.Cog):
                     related_users=[entry.user, target],
                     related_roles=added_roles,
                 )
+                if target_member is not None:
+                    await self.enforce_member_nickname(target_member)
 
             if removed_roles:
                 if target_id:
@@ -1239,6 +1353,8 @@ class AuditCog(commands.Cog):
                     related_users=[entry.user, target],
                     related_roles=removed_roles,
                 )
+                if target_member is not None:
+                    await self.enforce_member_nickname(target_member)
         elif action_value == 28:
             await self.audit.send_event(
                 guild,
@@ -1674,6 +1790,7 @@ class AuditCog(commands.Cog):
     async def on_member_join(self, member: discord.Member) -> None:
         if member.bot:
             return
+        await self.enforce_member_nickname(member)
         await self.audit.send_event(
             member.guild,
             "member_joined",
@@ -1722,8 +1839,9 @@ class AuditCog(commands.Cog):
             return
 
         guild = after.guild
+        skip_nickname_log = self._was_recent_managed_nickname_update(after)
 
-        if before.nick != after.nick:
+        if before.nick != after.nick and not skip_nickname_log:
             entry = await self.audit.fetch_recent_audit_entry(
                 guild,
                 actions=[discord.AuditLogAction.member_update],
@@ -1839,6 +1957,9 @@ class AuditCog(commands.Cog):
                 fields=[("С", discord.utils.format_dt(after.premium_since, style="F"), False)],
                 related_users=[after],
             )
+
+        if before.nick != after.nick or before.roles != after.roles:
+            await self.enforce_member_nickname(after)
 
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message) -> None:
