@@ -54,30 +54,48 @@ _CLEAN_TITLES = (
     "Живой, дышит, в бан не улетел.",
     "По PUBG вижу: пока всё спокойно.",
     "Ник нашла. Тревожная сирена молчит.",
+    "Фух, тут всё без красной карточки.",
+    "По банам тишина. Игрок пока дышит свободно.",
+    "Аккаунт чистый, паниковать рано.",
+    "Не пойман, не забанен. Пока всё мирно.",
 )
 _PERMABAN_TITLES = (
     "Пу-пу-пу... аккаунт уже отлетел.",
     "Ой. Тут уже бан-молоточек прилетел.",
     "Да-а-а... этого бойца уже списали с рейса.",
     "Походу, тут бан уже сказал последнее слово.",
+    "Тут уже не предупреждение, а финальные титры.",
+    "Ну всё, этот аккаунт PUBG уже похоронил официально.",
+    "Бан тут не намекает. Он уже закрыл дверь с ноги.",
+    "Аккаунт улетел так далеко, что даже парашют не поможет.",
 )
 _TEMPBAN_TITLES = (
     "Ой-ой, тут временная посадка.",
     "Аккаунт присел остыть. Пока не навсегда.",
     "Тут бан не вечный, но уже неприятный.",
+    "Пока не похороны, но в угол уже поставили.",
+    "Аккаунт сейчас на скамейке штрафников.",
+    "Ненадолго, но PUBG его уже дёрнул за рукав.",
+    "Тут бан с таймером, но осадочек всё равно сочный.",
 )
 _NOT_FOUND_TITLES = (
     "Ник не нашла, не ругайся.",
     "Пусто. Либо опечатка, либо не тот shard.",
     "Я покопалась, а ника там не видно.",
+    "Тишина. Такой ник мне PUBG не отдал.",
+    "Либо опечатка, либо этот игрок прячется лучше всех.",
 )
 _RATE_LIMIT_TITLES = (
     "Стоп-стоп, я уткнулась в лимит PUBG API.",
     "Пабг сказал: не так быстро, красавчики.",
+    "Сервак PUBG попросил очередь не ломать.",
+    "Я бы ещё сбегала, но API уже прикрыло калитку.",
 )
 _ERROR_TITLES = (
     "Я сходила в PUBG, а там дверь заклинило.",
     "Сервер PUBG сегодня с характером.",
+    "Постучалась в PUBG, а он сделал вид, что спит.",
+    "Сводка не вернулась. Видимо, PUBG сегодня драматизирует.",
 )
 
 
@@ -93,6 +111,23 @@ class PubgLifetimeSummary:
 
 
 @dataclass(slots=True)
+class PubgRankedSummary:
+    game_mode: str
+    current_tier: str
+    current_sub_tier: str | None
+    current_rank_point: int
+    best_tier: str
+    best_sub_tier: str | None
+    best_rank_point: int
+    rounds_played: int
+    avg_rank: float
+    win_ratio: float
+    top10_ratio: float
+    wins: int
+    kills: int
+
+
+@dataclass(slots=True)
 class PubgPlayerLookup:
     name: str
     account_id: str
@@ -100,6 +135,7 @@ class PubgPlayerLookup:
     clan_id: str | None
     ban_type: str | None
     recent_match_count: int
+    ranked_summary: PubgRankedSummary | None
     lifetime_summary: PubgLifetimeSummary | None
 
 
@@ -126,10 +162,12 @@ class _CacheEntry:
 class PubgLookupService:
     def __init__(self, config: BotConfig) -> None:
         self.config = config
-        self._cache: dict[tuple[str, str, bool], _CacheEntry] = {}
+        self._cache: dict[tuple[str, str, bool, bool], _CacheEntry] = {}
         self._user_cooldowns: dict[tuple[int, int], datetime] = {}
         self._rate_limit_remaining: int | None = None
         self._rate_limit_reset_at: datetime | None = None
+        self._current_season_id: str | None = None
+        self._current_season_loaded_at: datetime | None = None
 
     @property
     def is_enabled(self) -> bool:
@@ -330,10 +368,67 @@ class PubgLookupService:
             time_survived=float(best_mode_payload.get("timeSurvived", 0) or 0),
         )
 
+    def _resolve_current_season_id(self) -> str | None:
+        now = discord.utils.utcnow()
+        if (
+            self._current_season_id is not None
+            and self._current_season_loaded_at is not None
+            and now - self._current_season_loaded_at <= timedelta(hours=6)
+        ):
+            return self._current_season_id
+
+        payload, headers = self._request_json(f"https://api.pubg.com/shards/{self.config.pubg_platform}/seasons")
+        self._remember_headers(headers)
+        seasons = payload.get("data") or []
+        current = next((season for season in seasons if season.get("attributes", {}).get("isCurrentSeason")), None)
+        if current is None:
+            current = next((season for season in seasons if season.get("attributes", {}).get("isOffseason")), None)
+        season_id = str(current.get("id")) if current is not None else None
+        self._current_season_id = season_id
+        self._current_season_loaded_at = now
+        return season_id
+
+    def _extract_ranked_summary(self, payload: Any) -> PubgRankedSummary | None:
+        mode_stats = payload.get("data", {}).get("attributes", {}).get("rankedGameModeStats", {})
+        best_mode_name: str | None = None
+        best_mode_payload: dict[str, Any] | None = None
+        best_rounds = -1
+        best_rank_points = -1
+        for mode_name, mode_payload in mode_stats.items():
+            rounds_played = int(mode_payload.get("roundsPlayed", 0) or 0)
+            rank_points = int(mode_payload.get("currentRankPoint", 0) or 0)
+            if rounds_played > best_rounds or (rounds_played == best_rounds and rank_points > best_rank_points):
+                best_rounds = rounds_played
+                best_rank_points = rank_points
+                best_mode_name = mode_name
+                best_mode_payload = mode_payload
+        if best_mode_name is None or best_mode_payload is None or best_rounds <= 0:
+            return None
+
+        current_tier = best_mode_payload.get("currentTier", {}) or {}
+        best_tier = best_mode_payload.get("bestTier", {}) or {}
+        current_sub_tier_raw = str(current_tier.get("subTier") or "").strip()
+        best_sub_tier_raw = str(best_tier.get("subTier") or "").strip()
+        return PubgRankedSummary(
+            game_mode=best_mode_name,
+            current_tier=str(current_tier.get("tier") or "Unknown"),
+            current_sub_tier=current_sub_tier_raw or None,
+            current_rank_point=int(best_mode_payload.get("currentRankPoint", 0) or 0),
+            best_tier=str(best_tier.get("tier") or "Unknown"),
+            best_sub_tier=best_sub_tier_raw or None,
+            best_rank_point=int(best_mode_payload.get("bestRankPoint", 0) or 0),
+            rounds_played=int(best_mode_payload.get("roundsPlayed", 0) or 0),
+            avg_rank=float(best_mode_payload.get("avgRank", 0) or 0),
+            win_ratio=float(best_mode_payload.get("winRatio", 0) or 0),
+            top10_ratio=float(best_mode_payload.get("top10Ratio", 0) or 0),
+            wins=int(best_mode_payload.get("wins", 0) or 0),
+            kills=int(best_mode_payload.get("kills", 0) or 0),
+        )
+
     def _ban_text(self, ban_type: str | None) -> tuple[str, str, discord.Colour]:
         normalized = (ban_type or "").strip()
         lowered = normalized.lower()
-        if not normalized or lowered in {"noban", "none", "unknown"}:
+        if not normalized or lowered in {"innocent", "noban", "none", "unknown"}:
             return "Без бана", self._pick(_CLEAN_TITLES), discord.Colour.green()
         if "permanent" in lowered:
             return "Перманентный бан", self._pick(_PERMABAN_TITLES), discord.Colour.red()
@@ -353,6 +448,15 @@ class PubgLookupService:
         if sec or not parts:
             parts.append(f"{sec} сек")
         return " ".join(parts)
+
+    def _format_percent(self, ratio: float) -> str:
+        return f"{ratio * 100:.1f}%"
+
+    def _format_tier(self, tier: str, sub_tier: str | None) -> str:
+        tier_label = discord.utils.escape_markdown(tier)
+        if sub_tier:
+            return f"{tier_label} {discord.utils.escape_markdown(sub_tier)}"
+        return tier_label
 
     def _lookup_sync(self, nickname: str) -> PubgLookupResult:
         locally_limited, retry_after = self._is_rate_limited_locally()
@@ -375,6 +479,7 @@ class PubgLookupService:
         cache_key = (
             self.config.pubg_platform,
             self._normalize_nickname(nickname),
+            self.config.pubg_lookup_include_ranked,
             self.config.pubg_lookup_include_lifetime_stats,
         )
         cached = self._cache.get(cache_key)
@@ -466,7 +571,20 @@ class PubgLookupService:
         player = players[0]
         attributes = player.get("attributes", {})
         matches = player.get("relationships", {}).get("matches", {}).get("data", [])
+        ranked_summary: PubgRankedSummary | None = None
         lifetime_summary: PubgLifetimeSummary | None = None
+        if self.config.pubg_lookup_include_ranked:
+            try:
+                season_id = self._resolve_current_season_id()
+                if season_id:
+                    ranked_url = (
+                        f"https://api.pubg.com/shards/{self.config.pubg_platform}/players/{player['id']}/seasons/{season_id}/ranked"
+                    )
+                    ranked_payload, ranked_headers = self._request_json(ranked_url)
+                    self._remember_headers(ranked_headers)
+                    ranked_summary = self._extract_ranked_summary(ranked_payload)
+            except Exception:
+                ranked_summary = None
         if self.config.pubg_lookup_include_lifetime_stats:
             lifetime_url = f"https://api.pubg.com/shards/{self.config.pubg_platform}/players/{player['id']}/seasons/lifetime"
             try:
@@ -483,6 +601,7 @@ class PubgLookupService:
             clan_id=str(attributes.get("clanId") or "").strip() or None,
             ban_type=str(attributes.get("banType") or "").strip() or None,
             recent_match_count=len(matches),
+            ranked_summary=ranked_summary,
             lifetime_summary=lifetime_summary,
         )
         ban_label, title, color = self._ban_text(player_data.ban_type)
@@ -531,6 +650,25 @@ class PubgLookupService:
                 value=f"`{player.account_id}`",
                 inline=False,
             )
+            if player.ranked_summary is not None:
+                ranked = player.ranked_summary
+                embed.add_field(
+                    name="Ранг сейчас",
+                    value=self._format_tier(ranked.current_tier, ranked.current_sub_tier),
+                    inline=True,
+                )
+                embed.add_field(name="RP", value=str(ranked.current_rank_point), inline=True)
+                embed.add_field(name="Режим ранга", value=discord.utils.escape_markdown(ranked.game_mode), inline=True)
+                embed.add_field(
+                    name="Лучший ранг",
+                    value=self._format_tier(ranked.best_tier, ranked.best_sub_tier),
+                    inline=True,
+                )
+                embed.add_field(name="Ранговых каток", value=str(ranked.rounds_played), inline=True)
+                embed.add_field(name="Побед в ранге", value=str(ranked.wins), inline=True)
+                embed.add_field(name="Топ-10 в ранге", value=self._format_percent(ranked.top10_ratio), inline=True)
+                embed.add_field(name="Среднее место", value=f"{ranked.avg_rank:.2f}", inline=True)
+                embed.add_field(name="Фрагов в ранге", value=str(ranked.kills), inline=True)
             if player.lifetime_summary is not None:
                 summary = player.lifetime_summary
                 embed.add_field(
