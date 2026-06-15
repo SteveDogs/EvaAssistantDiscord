@@ -493,11 +493,74 @@ class AuditCog(commands.Cog):
     def _session_key(member: discord.Member) -> tuple[int, int]:
         return (member.guild.id, member.id)
 
-    def _start_session(self, bucket: dict[tuple[int, int], datetime], member: discord.Member) -> None:
-        bucket.setdefault(self._session_key(member), discord.utils.utcnow())
+    def _start_session(
+        self,
+        bucket: dict[tuple[int, int], datetime],
+        member: discord.Member,
+        *,
+        replace: bool = False,
+    ) -> None:
+        key = self._session_key(member)
+        if replace or key not in bucket:
+            bucket[key] = discord.utils.utcnow()
 
     def _stop_session(self, bucket: dict[tuple[int, int], datetime], member: discord.Member) -> str | None:
         return _format_duration(bucket.pop(self._session_key(member), None))
+
+    @staticmethod
+    def _format_voice_company(channel: discord.VoiceChannel | discord.StageChannel | None, member: discord.Member) -> str:
+        if channel is None:
+            return "Неизвестно"
+        companions = [other for other in channel.members if other.id != member.id and not other.bot]
+        if not companions:
+            return "Сидел один. Король комнаты."
+        labels = [other.mention for other in companions[:12]]
+        if len(companions) > 12:
+            labels.append(f"и ещё {len(companions) - 12}")
+        return ", ".join(labels)
+
+    async def _log_voice_session_finished(
+        self,
+        member: discord.Member,
+        channel: discord.VoiceChannel | discord.StageChannel | None,
+        *,
+        duration: str | None,
+        destination: discord.VoiceChannel | discord.StageChannel | None = None,
+        actor: discord.abc.User | None = None,
+        reason: str | None = None,
+    ) -> None:
+        if channel is None or duration is None:
+            return
+
+        description = (
+            f"**{_display_name(member)}** покинул {channel.mention} после **{duration}** в эфире."
+            if destination is None
+            else f"**{_display_name(member)}** завершил сессию в {channel.mention} спустя **{duration}** и уехал в {destination.mention}."
+        )
+        fields: list[tuple[str, str, bool]] = [
+            ("Канал", self.audit.format_channel(channel), False),
+            ("Пробыл", duration, True),
+            ("С кем сидел", self._format_voice_company(channel, member), False),
+        ]
+        if destination is not None:
+            fields.append(("Куда ушёл", self.audit.format_channel(destination), False))
+
+        await self.audit.send_event(
+            member.guild,
+            "member_voice_session_finished",
+            description,
+            actor=actor,
+            target=member,
+            reason=reason,
+            fields=fields,
+            show_actor_field=actor is not None,
+            actor_label="Кто помог закончить сессию",
+            target_label="Участник",
+            thumbnail_target=member,
+            related_channels=[channel, destination],
+            related_users=[member, actor],
+            include_case_id=False,
+        )
 
     async def cog_load(self) -> None:
         self.bot.tree.on_error = self.on_app_command_error
@@ -2103,6 +2166,13 @@ class AuditCog(commands.Cog):
                 )
                 if entry is not None and not self.audit.was_recent(guild.id, "member_disconnected", member.id, seconds=8):
                     self.audit.remember_recent(guild.id, "member_disconnected", member.id)
+                    await self._log_voice_session_finished(
+                        member,
+                        before.channel,
+                        duration=voice_duration,
+                        actor=entry.user,
+                        reason=entry.reason,
+                    )
                     fields = [
                         ("Кто навёл движ", self.audit.format_entity(entry.user), False),
                         ("Участник", self.audit.format_entity(member), False),
@@ -2124,6 +2194,11 @@ class AuditCog(commands.Cog):
                         related_users=[member, entry.user],
                     )
                     return
+                await self._log_voice_session_finished(
+                    member,
+                    before.channel,
+                    duration=voice_duration,
+                )
                 fields = [("Канал", self.audit.format_channel(before.channel), False)]
                 if voice_duration:
                     fields.append(("Просидел в войсе", voice_duration, True))
@@ -2152,9 +2227,19 @@ class AuditCog(commands.Cog):
                 return
 
             if before.channel is not None and after.channel is not None:
+                voice_duration = self._stop_session(self._voice_sessions, member)
                 entry = await self.find_member_move_entry(member, after.channel, max_age_seconds=8)
                 if entry is not None and not self.audit.was_recent(guild.id, "member_moved", member.id, seconds=8):
                     self.audit.remember_recent(guild.id, "member_moved", member.id)
+                    await self._log_voice_session_finished(
+                        member,
+                        before.channel,
+                        duration=voice_duration,
+                        destination=after.channel,
+                        actor=entry.user,
+                        reason=entry.reason,
+                    )
+                    self._start_session(self._voice_sessions, member, replace=True)
                     await self.audit.send_event(
                         guild,
                         "member_moved",
@@ -2177,6 +2262,13 @@ class AuditCog(commands.Cog):
                         related_users=[member, entry.user],
                     )
                     return
+                await self._log_voice_session_finished(
+                    member,
+                    before.channel,
+                    duration=voice_duration,
+                    destination=after.channel,
+                )
+                self._start_session(self._voice_sessions, member, replace=True)
                 await self.audit.send_event(
                     guild,
                     "member_voice_switched",
