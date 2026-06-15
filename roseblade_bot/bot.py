@@ -5,13 +5,13 @@ Copyright (c) 2026 Steve Dogs Studio.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import random
 from typing import Any
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from roseblade_bot import APP_NAME, APP_CODENAME
 from roseblade_bot.audit_definitions import CHANNEL_DEFINITIONS, EVENT_CHOICES, EVENT_DEFINITIONS
@@ -51,6 +51,7 @@ from roseblade_bot.message_handlers import (
     handle_on_raw_message_edit,
 )
 from roseblade_bot.pubg_lookup import PubgLookupService
+from roseblade_bot.steam_digest import SteamDigestService
 from roseblade_bot.storage import JsonStateStore
 from roseblade_bot.voice_guard import VOICE_GUARD
 from roseblade_bot.voice_handlers import handle_on_voice_state_update
@@ -71,6 +72,7 @@ class AuditCog(commands.Cog):
         self._chat_banter_last_channel_text: dict[tuple[int, int], str] = {}
         self._protected_voice_guard_recent: dict[tuple[int, int, int, int | None], datetime] = {}
         self.pubg_lookup = PubgLookupService(config)
+        self.steam_digest = SteamDigestService(config)
         self.audit = AuditLogger(
             store=store,
             default_category_name=config.audit_category_name,
@@ -247,6 +249,12 @@ class AuditCog(commands.Cog):
 
     async def cog_load(self) -> None:
         self.bot.tree.on_error = self.on_app_command_error
+        if self.steam_digest.is_configured and not self.steam_digest_scheduler.is_running():
+            self.steam_digest_scheduler.start()
+
+    def cog_unload(self) -> None:
+        if self.steam_digest_scheduler.is_running():
+            self.steam_digest_scheduler.cancel()
 
     async def on_app_command_error(
         self,
@@ -296,6 +304,55 @@ class AuditCog(commands.Cog):
             for member in guild.members:
                 await self.enforce_member_nickname(member)
         self._bootstrapped_guild_ids.add(guild.id)
+
+    @tasks.loop(minutes=1)
+    async def steam_digest_scheduler(self) -> None:
+        if not self.steam_digest.is_configured:
+            return
+
+        now = datetime.now(self.steam_digest.timezone)
+        if not self.steam_digest.is_due(now):
+            return
+
+        target_channels: list[discord.TextChannel] = []
+        today = self.steam_digest.local_today(now, self.steam_digest.timezone)
+        for channel_id in sorted(self.config.steam_digest_channel_ids):
+            channel = self.bot.get_channel(channel_id)
+            if channel is None:
+                try:
+                    channel = await self.bot.fetch_channel(channel_id)
+                except (discord.Forbidden, discord.HTTPException):
+                    continue
+            if not isinstance(channel, discord.TextChannel):
+                continue
+            if self._steam_digest_was_sent_today(channel.guild.id, channel.id, today):
+                continue
+            target_channels.append(channel)
+
+        if not target_channels:
+            return
+
+        try:
+            report = await self.steam_digest.build_report()
+        except Exception as error:
+            print(f"Steam digest build failed: {error}")
+            return
+
+        for channel in target_channels:
+            embed = self.steam_digest.build_embed(report)
+            try:
+                await channel.send(embed=embed)
+            except (discord.Forbidden, discord.HTTPException):
+                continue
+            self._mark_steam_digest_sent(channel.guild.id, channel.id, today)
+
+    @steam_digest_scheduler.before_loop
+    async def before_steam_digest_scheduler(self) -> None:
+        await self.bot.wait_until_ready()
+
+    @steam_digest_scheduler.error
+    async def steam_digest_scheduler_error(self, error: Exception) -> None:
+        print(f"Steam digest scheduler crashed: {error}")
 
     async def find_message_delete_entry(
         self,
@@ -450,6 +507,28 @@ class AuditCog(commands.Cog):
         protected = set(self.config.protected_voice_guard_user_ids)
         protected.add(guild.owner_id)
         return protected
+
+    def _steam_digest_last_sent_by_channel(self, guild_id: int) -> dict[str, str]:
+        service_state = self.store.get_service_state(guild_id, "steam_digest")
+        channel_dates = service_state.get("last_sent_by_channel")
+        if not isinstance(channel_dates, dict):
+            channel_dates = {}
+            service_state["last_sent_by_channel"] = channel_dates
+            self.store.set_service_state(guild_id, "steam_digest", service_state)
+        return {str(key): str(value) for key, value in channel_dates.items()}
+
+    def _steam_digest_was_sent_today(self, guild_id: int, channel_id: int, today: date) -> bool:
+        last_sent = self._steam_digest_last_sent_by_channel(guild_id).get(str(channel_id))
+        return last_sent == today.isoformat()
+
+    def _mark_steam_digest_sent(self, guild_id: int, channel_id: int, today: date) -> None:
+        service_state = self.store.get_service_state(guild_id, "steam_digest")
+        channel_dates = service_state.get("last_sent_by_channel")
+        if not isinstance(channel_dates, dict):
+            channel_dates = {}
+        channel_dates[str(channel_id)] = today.isoformat()
+        service_state["last_sent_by_channel"] = channel_dates
+        self.store.set_service_state(guild_id, "steam_digest", service_state)
 
     def is_protected_voice_guard_target(self, member: discord.Member) -> bool:
         if not self.config.protected_voice_guard_enabled:
@@ -628,6 +707,15 @@ class AuditCog(commands.Cog):
             f" lifetime={_bool_label(self.config.pubg_lookup_include_lifetime_stats)},"
             f" steam_key={_bool_label(self.pubg_lookup.has_steam_key())}"
         )
+        lines.append(
+            "Steam digest:"
+            f" enabled={_bool_label(self.config.steam_digest_enabled)},"
+            f" configured={_bool_label(self.steam_digest.is_configured)},"
+            f" channels={self.steam_digest.channel_count()},"
+            f" schedule={self.steam_digest.schedule_label()},"
+            f" top={self.config.steam_digest_top_count},"
+            f" support={_bool_label(self.config.steam_digest_include_support_stats)}"
+        )
         ignored = saved["ignored"]
         ignored_channel_count = len(self.get_ignored_channel_ids(interaction.guild.id))
         lines.append(
@@ -639,6 +727,39 @@ class AuditCog(commands.Cog):
         )
 
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+    @app_commands.command(name="steam_digest_now", description="Отправить тестовый Steam-дайджест в текущий канал")
+    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.guild_only()
+    async def steam_digest_now(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        if not self.steam_digest.is_configured:
+            await interaction.followup.send(
+                "Steam-дайджест сейчас выключен или для него не заданы каналы в конфиге.",
+                ephemeral=True,
+            )
+            return
+
+        channel = interaction.channel
+        if channel is None or not isinstance(channel, (discord.TextChannel, discord.Thread)):
+            await interaction.followup.send(
+                "В этот тип канала я тестовый дайджест не отправлю. Нужен обычный текстовый канал или ветка.",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            report = await self.steam_digest.build_report()
+            embed = self.steam_digest.build_embed(report)
+            await channel.send(embed=embed)
+        except (discord.Forbidden, discord.HTTPException) as error:
+            await interaction.followup.send(f"Не смогла отправить дайджест: {error}", ephemeral=True)
+            return
+        except Exception as error:
+            await interaction.followup.send(f"Не смогла собрать Steam-дайджест: {error}", ephemeral=True)
+            return
+
+        await interaction.followup.send("Тестовый Steam-дайджест отправлен в этот канал.", ephemeral=True)
 
     @app_commands.command(name="audit_events", description="Список ключей событий для настройки цветов")
     @app_commands.checks.has_permissions(administrator=True)

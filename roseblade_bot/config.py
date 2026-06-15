@@ -53,6 +53,13 @@ class BotConfig:
     pubg_lookup_include_lifetime_stats: bool
     pubg_lookup_cache_ttl_seconds: int
     pubg_lookup_user_cooldown_seconds: int
+    steam_digest_enabled: bool
+    steam_digest_channel_ids: frozenset[int]
+    steam_digest_hour: int
+    steam_digest_minute: int
+    steam_digest_timezone: str
+    steam_digest_top_count: int
+    steam_digest_include_support_stats: bool
 
 
 def _parse_bool_env(name: str, default: bool = False) -> bool:
@@ -149,6 +156,13 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
     pubg_lookup_include_lifetime_stats = _parse_bool_env("PUBG_LOOKUP_INCLUDE_LIFETIME_STATS", default=False)
     pubg_lookup_cache_ttl_seconds = max(60, _parse_int_env("PUBG_LOOKUP_CACHE_TTL_SECONDS", default=900))
     pubg_lookup_user_cooldown_seconds = max(0, _parse_int_env("PUBG_LOOKUP_USER_COOLDOWN_SECONDS", default=20))
+    steam_digest_enabled = _parse_bool_env("STEAM_DIGEST_ENABLED", default=False)
+    steam_digest_channel_ids = _parse_id_set_env("STEAM_DIGEST_CHANNEL_IDS")
+    steam_digest_hour = min(23, max(0, _parse_int_env("STEAM_DIGEST_HOUR", default=20)))
+    steam_digest_minute = min(59, max(0, _parse_int_env("STEAM_DIGEST_MINUTE", default=0)))
+    steam_digest_timezone = os.getenv("STEAM_DIGEST_TIMEZONE", "Europe/Simferopol").strip() or "Europe/Simferopol"
+    steam_digest_top_count = min(25, max(5, _parse_int_env("STEAM_DIGEST_TOP_COUNT", default=15)))
+    steam_digest_include_support_stats = _parse_bool_env("STEAM_DIGEST_INCLUDE_SUPPORT_STATS", default=True)
 
     return BotConfig(
         token=token,
@@ -176,4 +190,11 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
         pubg_lookup_include_lifetime_stats=pubg_lookup_include_lifetime_stats,
         pubg_lookup_cache_ttl_seconds=pubg_lookup_cache_ttl_seconds,
         pubg_lookup_user_cooldown_seconds=pubg_lookup_user_cooldown_seconds,
+        steam_digest_enabled=steam_digest_enabled,
+        steam_digest_channel_ids=steam_digest_channel_ids,
+        steam_digest_hour=steam_digest_hour,
+        steam_digest_minute=steam_digest_minute,
+        steam_digest_timezone=steam_digest_timezone,
+        steam_digest_top_count=steam_digest_top_count,
+        steam_digest_include_support_stats=steam_digest_include_support_stats,
     )

@@ -50,6 +50,7 @@ class JsonStateStore:
                 "channels": {},
                 "colors": {},
                 "enabled_events": {},
+                "service_state": {},
                 "ignored": {
                     "channel_ids": [],
                     "category_ids": [],
@@ -62,6 +63,7 @@ class JsonStateStore:
         guild.setdefault("channels", {})
         guild.setdefault("colors", {})
         guild.setdefault("enabled_events", {})
+        guild.setdefault("service_state", {})
         ignored = guild.setdefault("ignored", {})
         ignored.setdefault("channel_ids", [])
         ignored.setdefault("category_ids", [])
@@ -126,3 +128,15 @@ class JsonStateStore:
         guild["next_case_id"] = case_id + 1
         self.save()
         return case_id
+
+    def get_service_state(self, guild_id: int, service_key: str) -> dict[str, Any]:
+        guild = self.get_guild(guild_id)
+        service_state = guild.setdefault("service_state", {})
+        state = service_state.setdefault(service_key, {})
+        return state
+
+    def set_service_state(self, guild_id: int, service_key: str, state: dict[str, Any]) -> None:
+        guild = self.get_guild(guild_id)
+        service_state = guild.setdefault("service_state", {})
+        service_state[service_key] = deepcopy(state)
+        self.save()
