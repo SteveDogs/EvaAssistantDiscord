@@ -1,7 +1,7 @@
 [project]
 name = "eva-assistant-discord"
-version = "0.1.0"
-description = "Discord-бот для красивых аудит-логов и модерации от Steve Dogs Studio."
+version = "0.2.0"
+description = "Discord-бот для красивых аудит-логов, стримов, AutoMod и саунд-панели от Steve Dogs Studio."
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import io
 from collections.abc import Sequence
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 import discord
@@ -29,7 +29,8 @@ def _format_message_content(content: str | None) -> str:
         return "_Пусто или нет доступа к содержимому._"
     if len(shortened) > 1000:
         return shortened[:997] + "..."
-    return shortened
+    escaped = discord.utils.escape_mentions(discord.utils.escape_markdown(shortened))
+    return "\n".join(f"> {line}" if line else "> " for line in escaped.splitlines()) or "> "
 
 
 def _format_deleted_message_body(
@@ -73,8 +74,6 @@ def _format_voice_flags(before: discord.VoiceState, after: discord.VoiceState) -
     labels = {
         "self_mute": "Сам себе выключил микрофон",
         "self_deaf": "Сам себе выключил звук",
-        "self_stream": "Стрим",
-        "self_video": "Камера",
         "suppress": "Подавление",
     }
 
@@ -165,15 +164,32 @@ def _voice_state_summary(changes: Sequence[str]) -> str:
         "Сам себе выключил микрофон: выключено": "включил себе микрофон",
         "Сам себе выключил звук: включено": "отключил себе звук",
         "Сам себе выключил звук: выключено": "вернул себе звук",
-        "Стрим: включено": "запустил стрим",
-        "Стрим: выключено": "остановил стрим",
-        "Камера: включено": "включил камеру",
-        "Камера: выключено": "выключил камеру",
         "Подавление: включено": "попал под подавление",
         "Подавление: выключено": "вышел из подавления",
     }
     actions = [mapping.get(change, change.lower()) for change in changes]
     return _human_join(actions)
+
+
+def _format_duration(started_at: datetime | None) -> str | None:
+    if started_at is None:
+        return None
+    delta = discord.utils.utcnow() - started_at
+    total_seconds = max(int(delta.total_seconds()), 0)
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    parts: list[str] = []
+    if hours:
+        parts.append(f"{hours} ч")
+    if minutes:
+        parts.append(f"{minutes} мин")
+    if seconds or not parts:
+        parts.append(f"{seconds} сек")
+    return " ".join(parts)
+
+
+def _message_jump_url(guild_id: int, channel_id: int, message_id: int) -> str:
+    return f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
 
 
 def _channel_snapshot(entry: discord.AuditLogEntry, audit: AuditLogger) -> tuple[str, list[tuple[str, str, bool]]]:
@@ -265,19 +281,197 @@ def _webhook_snapshot(target: Any, audit: AuditLogger) -> tuple[str, list[tuple[
     return name, fields
 
 
-def _invite_snapshot(target: Any, audit: AuditLogger) -> tuple[str, list[tuple[str, str, bool]]]:
-    code = getattr(target, "code", None) or "unknown"
+def _invite_entry_snapshot(entry: discord.AuditLogEntry, audit: AuditLogger) -> tuple[str, list[tuple[str, str, bool]]]:
+    if entry.action == discord.AuditLogAction.invite_delete:
+        source = entry.before
+    else:
+        source = entry.target or entry.after or entry.before
+    code = getattr(source, "code", None) or "unknown"
     fields: list[tuple[str, str, bool]] = [("Код", f"`{code}`", False)]
 
-    channel = getattr(target, "channel", None)
+    channel = getattr(source, "channel", None)
     if channel is not None:
         fields.append(("Канал", audit.format_entity(channel), False))
 
-    inviter = getattr(target, "inviter", None)
+    inviter = getattr(source, "inviter", None)
     if inviter is not None:
         fields.append(("Создатель", audit.format_entity(inviter), False))
 
+    max_age = getattr(source, "max_age", None)
+    if isinstance(max_age, int):
+        fields.append(("Срок", "Без срока" if max_age == 0 else f"{max_age} сек", True))
+
+    max_uses = getattr(source, "max_uses", None)
+    if isinstance(max_uses, int):
+        fields.append(("Использований", "Без лимита" if max_uses == 0 else str(max_uses), True))
+
     return code, fields
+
+
+def _emoji_snapshot(entry: discord.AuditLogEntry, audit: AuditLogger) -> tuple[str, list[tuple[str, str, bool]]]:
+    if entry.action == discord.AuditLogAction.emoji_delete:
+        source = entry.before
+    elif entry.action == discord.AuditLogAction.emoji_create:
+        source = entry.after
+    else:
+        source = entry.target or entry.after or entry.before
+
+    emoji_id = getattr(entry.target, "id", None)
+    name = getattr(source, "name", None) or (f"emoji-{emoji_id}" if emoji_id else "эмодзи")
+    fields: list[tuple[str, str, bool]] = [("Эмодзи", _named_id_block(name, emoji_id), False)]
+
+    preview = str(entry.target) if isinstance(entry.target, discord.Emoji) else None
+    if preview:
+        fields.append(("Превью", preview, True))
+
+    roles = list(getattr(source, "roles", []) or [])
+    if roles:
+        fields.append(("Доступно ролям", audit.format_entity(roles), False))
+
+    return name, fields
+
+
+def _sticker_snapshot(entry: discord.AuditLogEntry, audit: AuditLogger) -> tuple[str, list[tuple[str, str, bool]]]:
+    if entry.action == discord.AuditLogAction.sticker_delete:
+        source = entry.before
+    elif entry.action == discord.AuditLogAction.sticker_create:
+        source = entry.after
+    else:
+        source = entry.target or entry.after or entry.before
+
+    sticker_id = getattr(entry.target, "id", None)
+    name = getattr(source, "name", None) or (f"sticker-{sticker_id}" if sticker_id else "стикер")
+    fields: list[tuple[str, str, bool]] = [("Стикер", _named_id_block(name, sticker_id), False)]
+
+    emoji = getattr(source, "emoji", None)
+    if emoji:
+        fields.append(("Эмодзи", str(emoji), True))
+
+    description = getattr(source, "description", None)
+    if description:
+        fields.append(("Описание", audit.shorten(description, 1024), False))
+
+    format_type = getattr(source, "format", None) or getattr(source, "format_type", None)
+    if format_type is not None:
+        fields.append(("Формат", audit.format_change_value(format_type), True))
+
+    return name, fields
+
+
+def _soundboard_snapshot(entry: discord.AuditLogEntry) -> tuple[str, list[tuple[str, str, bool]]]:
+    if entry.action == discord.AuditLogAction.soundboard_sound_delete:
+        source = entry.before
+    elif entry.action == discord.AuditLogAction.soundboard_sound_create:
+        source = entry.after
+    else:
+        source = entry.after or entry.before
+
+    sound_id = getattr(entry.target, "id", None)
+    name = getattr(source, "name", None) or (f"sound-{sound_id}" if sound_id else "звук")
+    fields: list[tuple[str, str, bool]] = [("Звук", _named_id_block(name, sound_id), False)]
+
+    emoji_name = getattr(source, "emoji_name", None)
+    if emoji_name:
+        fields.append(("Эмодзи", emoji_name, True))
+
+    volume = getattr(source, "volume", None)
+    if isinstance(volume, (int, float)):
+        fields.append(("Громкость", f"{round(float(volume) * 100)}%", True))
+
+    available = getattr(source, "available", None)
+    if isinstance(available, bool):
+        fields.append(("Доступен", "Да" if available else "Нет", True))
+
+    return name, fields
+
+
+def _stage_snapshot(entry: discord.AuditLogEntry, audit: AuditLogger) -> tuple[str, list[tuple[str, str, bool]]]:
+    source = entry.target or entry.after or entry.before
+    channel = getattr(entry.extra, "channel", None)
+    topic = getattr(source, "topic", None) or (channel.name if channel is not None else "Сцена")
+    fields: list[tuple[str, str, bool]] = []
+    if channel is not None:
+        fields.append(("Сцена", audit.format_channel(channel), False))
+
+    privacy_level = getattr(source, "privacy_level", None) or getattr(entry.after, "privacy_level", None)
+    if privacy_level is not None:
+        fields.append(("Приватность", audit.format_change_value(privacy_level), True))
+
+    return topic, fields
+
+
+def _scheduled_event_snapshot(entry: discord.AuditLogEntry, audit: AuditLogger) -> tuple[str, list[tuple[str, str, bool]]]:
+    if entry.action == discord.AuditLogAction.scheduled_event_delete:
+        source = entry.before
+    elif entry.action == discord.AuditLogAction.scheduled_event_create:
+        source = entry.after
+    else:
+        source = entry.target or entry.after or entry.before
+
+    event_id = getattr(entry.target, "id", None)
+    name = getattr(source, "name", None) or (f"event-{event_id}" if event_id else "событие")
+    fields: list[tuple[str, str, bool]] = [("Событие", _named_id_block(name, event_id), False)]
+
+    channel = getattr(source, "channel", None)
+    if channel is not None:
+        fields.append(("Канал", audit.format_entity(channel), False))
+
+    location = getattr(source, "location", None)
+    if isinstance(location, str) and location.strip():
+        fields.append(("Локация", location.strip(), False))
+
+    scheduled_start = getattr(source, "scheduled_start_time", None)
+    if isinstance(scheduled_start, datetime):
+        fields.append(("Старт", discord.utils.format_dt(scheduled_start, style="F"), False))
+
+    scheduled_end = getattr(source, "scheduled_end_time", None)
+    if isinstance(scheduled_end, datetime):
+        fields.append(("Финиш", discord.utils.format_dt(scheduled_end, style="F"), False))
+
+    status = getattr(source, "status", None)
+    if status is not None:
+        fields.append(("Статус", audit.format_change_value(status), True))
+
+    entity_type = getattr(source, "entity_type", None)
+    if entity_type is not None:
+        fields.append(("Тип", audit.format_change_value(entity_type), True))
+
+    return name, fields
+
+
+def _automod_rule_snapshot(entry: discord.AuditLogEntry, audit: AuditLogger) -> tuple[str, list[tuple[str, str, bool]]]:
+    if entry.action == discord.AuditLogAction.automod_rule_delete:
+        source = entry.before
+    elif entry.action == discord.AuditLogAction.automod_rule_create:
+        source = entry.after
+    else:
+        source = entry.target or entry.after or entry.before
+
+    rule_id = getattr(entry.target, "id", None)
+    name = getattr(source, "name", None) or (f"rule-{rule_id}" if rule_id else "правило")
+    fields: list[tuple[str, str, bool]] = [("Правило", _named_id_block(name, rule_id), False)]
+
+    trigger_type = getattr(source, "trigger_type", None)
+    if trigger_type is not None:
+        fields.append(("Триггер", audit.format_change_value(trigger_type), True))
+
+    event_type = getattr(source, "event_type", None)
+    if event_type is not None:
+        fields.append(("Тип проверки", audit.format_change_value(event_type), True))
+
+    actions = getattr(source, "actions", None)
+    if actions:
+        fields.append(("Действия", audit.format_change_value(list(actions)), False))
+
+    exempt_channels = getattr(source, "exempt_channels", None)
+    if exempt_channels:
+        fields.append(("Исключённые каналы", audit.format_change_value(list(exempt_channels)), False))
+
+    exempt_roles = getattr(source, "exempt_roles", None)
+    if exempt_roles:
+        fields.append(("Исключённые роли", audit.format_change_value(list(exempt_roles)), False))
+
+    return name, fields
 
 
 class AuditCog(commands.Cog):
@@ -286,11 +480,24 @@ class AuditCog(commands.Cog):
         self.config = config
         self.store = store
         self._bootstrapped_guild_ids: set[int] = set()
+        self._voice_sessions: dict[tuple[int, int], datetime] = {}
+        self._stream_sessions: dict[tuple[int, int], datetime] = {}
+        self._camera_sessions: dict[tuple[int, int], datetime] = {}
         self.audit = AuditLogger(
             store=store,
             default_category_name=config.audit_category_name,
             default_category_id=config.audit_category_id,
         )
+
+    @staticmethod
+    def _session_key(member: discord.Member) -> tuple[int, int]:
+        return (member.guild.id, member.id)
+
+    def _start_session(self, bucket: dict[tuple[int, int], datetime], member: discord.Member) -> None:
+        bucket.setdefault(self._session_key(member), discord.utils.utcnow())
+
+    def _stop_session(self, bucket: dict[tuple[int, int], datetime], member: discord.Member) -> str | None:
+        return _format_duration(bucket.pop(self._session_key(member), None))
 
     async def cog_load(self) -> None:
         self.bot.tree.on_error = self.on_app_command_error
@@ -421,6 +628,27 @@ class AuditCog(commands.Cog):
             return None
 
         return fallback
+
+    async def fetch_message_excerpt(
+        self,
+        channel: discord.TextChannel | discord.Thread,
+        message_id: int,
+    ) -> list[tuple[str, str, bool]]:
+        try:
+            message = await channel.fetch_message(message_id)
+        except (discord.Forbidden, discord.HTTPException, AttributeError):
+            return []
+
+        fields: list[tuple[str, str, bool]] = [
+            ("Сообщение", _format_deleted_message_body(message, message_content_intent_enabled=self.config.enable_message_content_intent), False),
+        ]
+        attachments = _format_attachments(message)
+        if attachments:
+            fields.append(("Вложения", attachments, False))
+        reference = _format_reference(message)
+        if reference:
+            fields.append(("Ответ на", reference, False))
+        return fields
 
     @app_commands.command(name="audit_setup", description="Создать категорию и каналы для аудита")
     @app_commands.describe(category_name="Название категории аудита")
@@ -708,7 +936,39 @@ class AuditCog(commands.Cog):
         target = entry.target
 
         # Compare by raw audit action value to avoid enum alias inconsistencies across discord.py builds.
-        if action_value == 22:
+        if action_value == 20:
+            target_id = getattr(target, "id", 0)
+            if target_id:
+                self.audit.remember_recent(guild.id, "member_kicked", target_id)
+            await self.audit.send_event(
+                guild,
+                "member_kicked",
+                f"{_display_name(entry.user, 'Кто-то из стаффа')} показал **{_display_name(target)}** дверь сервера.",
+                actor=entry.user,
+                target=target,
+                reason=entry.reason,
+                related_users=[entry.user, target],
+            )
+        elif action_value == 21:
+            removed = getattr(entry.extra, "members_removed", None)
+            prune_days = getattr(entry.extra, "delete_member_days", None)
+            fields = []
+            if removed is not None:
+                fields.append(("Сколько убрало", str(removed), True))
+            if prune_days is not None:
+                fields.append(("Неактивность от", f"{prune_days} дн.", True))
+            await self.audit.send_event(
+                guild,
+                "members_pruned",
+                f"{_display_name(entry.user, 'Кто-то из стаффа')} устроил массовую чистку неактивных участников.",
+                actor=entry.user,
+                reason=entry.reason,
+                fields=fields,
+                show_target_field=False,
+                related_users=[entry.user],
+                include_case_id=False,
+            )
+        elif action_value == 22:
             target_id = getattr(target, "id", 0)
             if target_id:
                 self.audit.remember_recent(guild.id, "member_banned", target_id)
@@ -729,19 +989,6 @@ class AuditCog(commands.Cog):
                 guild,
                 "member_unbanned",
                 f"{_display_name(entry.user, 'Кто-то из стаффа')} вернул **{_display_name(target)}** из бан-листа.",
-                actor=entry.user,
-                target=target,
-                reason=entry.reason,
-                related_users=[entry.user, target],
-            )
-        elif action_value == 20:
-            target_id = getattr(target, "id", 0)
-            if target_id:
-                self.audit.remember_recent(guild.id, "member_kicked", target_id)
-            await self.audit.send_event(
-                guild,
-                "member_kicked",
-                f"{_display_name(entry.user, 'Кто-то из стаффа')} показал **{_display_name(target)}** дверь сервера.",
                 actor=entry.user,
                 target=target,
                 reason=entry.reason,
@@ -929,8 +1176,28 @@ class AuditCog(commands.Cog):
                     related_users=[entry.user, target],
                     related_roles=removed_roles,
                 )
+        elif action_value == 28:
+            await self.audit.send_event(
+                guild,
+                "bot_added",
+                f"{_display_name(entry.user, 'Кто-то из стаффа')} добавил на сервер бота **{_display_name(target)}**.",
+                actor=entry.user,
+                target=target,
+                reason=entry.reason,
+                fields=[
+                    (
+                        "Аккаунт бота создан",
+                        discord.utils.format_dt(target.created_at, style="F")
+                        if isinstance(target, (discord.Member, discord.User))
+                        else "Неизвестно",
+                        False,
+                    )
+                ],
+                related_users=[entry.user, target],
+                thumbnail_target=target,
+            )
         elif action_value == 40:
-            code, fields = _invite_snapshot(target, self.audit)
+            code, fields = _invite_entry_snapshot(entry, self.audit)
             await self.audit.send_event(
                 guild,
                 "invite_created",
@@ -939,11 +1206,27 @@ class AuditCog(commands.Cog):
                 reason=entry.reason,
                 fields=fields,
                 show_target_field=False,
-                related_channels=[getattr(target, "channel", None)],
-                related_users=[entry.user, getattr(target, "inviter", None)],
+                related_channels=[getattr(entry.target, "channel", None), getattr(entry.after, "channel", None)],
+                related_users=[entry.user, getattr(entry.target, "inviter", None), getattr(entry.after, "inviter", None)],
+            )
+        elif action_value == 41:
+            code, fields = _invite_entry_snapshot(entry, self.audit)
+            changes = self.audit.describe_changes(entry)
+            if changes:
+                fields.append(("Что изменилось", changes, False))
+            await self.audit.send_event(
+                guild,
+                "invite_updated",
+                f"{_display_name(entry.user, 'Кто-то из стаффа')} освежил настройки приглашения **{code}**.",
+                actor=entry.user,
+                reason=entry.reason,
+                fields=fields,
+                show_target_field=False,
+                related_channels=[getattr(entry.target, "channel", None), getattr(entry.after, "channel", None)],
+                related_users=[entry.user, getattr(entry.target, "inviter", None), getattr(entry.after, "inviter", None)],
             )
         elif action_value == 42:
-            code, fields = _invite_snapshot(target, self.audit)
+            code, fields = _invite_entry_snapshot(entry, self.audit)
             await self.audit.send_event(
                 guild,
                 "invite_deleted",
@@ -952,8 +1235,79 @@ class AuditCog(commands.Cog):
                 reason=entry.reason,
                 fields=fields,
                 show_target_field=False,
-                related_channels=[getattr(target, "channel", None)],
-                related_users=[entry.user, getattr(target, "inviter", None)],
+                related_channels=[getattr(entry.before, "channel", None), getattr(entry.target, "channel", None)],
+                related_users=[entry.user, getattr(entry.before, "inviter", None), getattr(entry.target, "inviter", None)],
+            )
+        elif action_value == 60:
+            emoji_name, fields = _emoji_snapshot(entry, self.audit)
+            await self.audit.send_event(
+                guild,
+                "emoji_created",
+                f"{_display_name(entry.user, 'Кто-то из стаффа')} добавил эмодзи **{discord.utils.escape_markdown(emoji_name)}**.",
+                actor=entry.user,
+                reason=entry.reason,
+                fields=fields,
+                show_target_field=False,
+                related_users=[entry.user],
+            )
+        elif action_value == 61:
+            emoji_name, fields = _emoji_snapshot(entry, self.audit)
+            changes = self.audit.describe_changes(entry)
+            if changes:
+                fields.append(("Что изменилось", changes, False))
+            await self.audit.send_event(
+                guild,
+                "emoji_updated",
+                f"{_display_name(entry.user, 'Кто-то из стаффа')} обновил эмодзи **{discord.utils.escape_markdown(emoji_name)}**.",
+                actor=entry.user,
+                reason=entry.reason,
+                fields=fields,
+                show_target_field=False,
+                related_users=[entry.user],
+            )
+        elif action_value == 62:
+            emoji_name, fields = _emoji_snapshot(entry, self.audit)
+            await self.audit.send_event(
+                guild,
+                "emoji_deleted",
+                f"{_display_name(entry.user, 'Кто-то из стаффа')} убрал эмодзи **{discord.utils.escape_markdown(emoji_name)}**.",
+                actor=entry.user,
+                reason=entry.reason,
+                fields=fields,
+                show_target_field=False,
+                related_users=[entry.user],
+            )
+        elif action_value in {74, 75}:
+            channel = getattr(entry.extra, "channel", None)
+            message_id = getattr(entry.extra, "message_id", None)
+            action_key = "message_pinned" if action_value == 74 else "message_unpinned"
+            action_text = "приколол" if action_value == 74 else "открепил"
+            actor_label = "Кто закрепил" if action_value == 74 else "Кто открепил"
+            fields: list[tuple[str, str, bool]] = []
+            if channel is not None:
+                fields.append(("Канал", self.audit.format_channel(channel), False))
+            if message_id is not None:
+                fields.append(("Message ID", f"`{message_id}`", True))
+                if channel is not None and getattr(channel, "id", None) is not None:
+                    fields.append(("Ссылка", _message_jump_url(guild.id, channel.id, message_id), False))
+                    if isinstance(channel, (discord.TextChannel, discord.Thread)):
+                        fields.extend(await self.fetch_message_excerpt(channel, message_id))
+            await self.audit.send_event(
+                guild,
+                action_key,
+                f"{_display_name(entry.user, 'Кто-то из стаффа')} {action_text} сообщение **{_display_name(target, 'без автора')}**.",
+                actor=entry.user,
+                target=target,
+                reason=entry.reason,
+                fields=fields,
+                show_actor_field=True,
+                show_target_field=target is not None,
+                actor_label=actor_label,
+                target_label="Чьё сообщение",
+                thumbnail_target=target,
+                related_channels=[channel],
+                related_users=[entry.user, target],
+                include_case_id=False,
             )
         elif action_value == 1:
             changes = self.audit.describe_changes(entry)
@@ -970,6 +1324,129 @@ class AuditCog(commands.Cog):
                 show_target_field=False,
                 related_users=[entry.user],
             )
+        elif action_value == 83:
+            stage_topic, fields = _stage_snapshot(entry, self.audit)
+            await self.audit.send_event(
+                guild,
+                "stage_instance_created",
+                f"{_display_name(entry.user, 'Кто-то из стаффа')} открыл сцену **{discord.utils.escape_markdown(stage_topic)}**.",
+                actor=entry.user,
+                reason=entry.reason,
+                fields=fields,
+                show_target_field=False,
+                related_channels=[getattr(entry.extra, "channel", None)],
+                related_users=[entry.user],
+            )
+        elif action_value == 84:
+            stage_topic, fields = _stage_snapshot(entry, self.audit)
+            changes = self.audit.describe_changes(entry)
+            if changes:
+                fields.append(("Что изменилось", changes, False))
+            await self.audit.send_event(
+                guild,
+                "stage_instance_updated",
+                f"{_display_name(entry.user, 'Кто-то из стаффа')} обновил сцену **{discord.utils.escape_markdown(stage_topic)}**.",
+                actor=entry.user,
+                reason=entry.reason,
+                fields=fields,
+                show_target_field=False,
+                related_channels=[getattr(entry.extra, "channel", None)],
+                related_users=[entry.user],
+            )
+        elif action_value == 85:
+            stage_topic, fields = _stage_snapshot(entry, self.audit)
+            await self.audit.send_event(
+                guild,
+                "stage_instance_deleted",
+                f"{_display_name(entry.user, 'Кто-то из стаффа')} закрыл сцену **{discord.utils.escape_markdown(stage_topic)}**.",
+                actor=entry.user,
+                reason=entry.reason,
+                fields=fields,
+                show_target_field=False,
+                related_channels=[getattr(entry.extra, "channel", None)],
+                related_users=[entry.user],
+            )
+        elif action_value == 90:
+            sticker_name, fields = _sticker_snapshot(entry, self.audit)
+            await self.audit.send_event(
+                guild,
+                "sticker_created",
+                f"{_display_name(entry.user, 'Кто-то из стаффа')} добавил стикер **{discord.utils.escape_markdown(sticker_name)}**.",
+                actor=entry.user,
+                reason=entry.reason,
+                fields=fields,
+                show_target_field=False,
+                related_users=[entry.user],
+            )
+        elif action_value == 91:
+            sticker_name, fields = _sticker_snapshot(entry, self.audit)
+            changes = self.audit.describe_changes(entry)
+            if changes:
+                fields.append(("Что изменилось", changes, False))
+            await self.audit.send_event(
+                guild,
+                "sticker_updated",
+                f"{_display_name(entry.user, 'Кто-то из стаффа')} обновил стикер **{discord.utils.escape_markdown(sticker_name)}**.",
+                actor=entry.user,
+                reason=entry.reason,
+                fields=fields,
+                show_target_field=False,
+                related_users=[entry.user],
+            )
+        elif action_value == 92:
+            sticker_name, fields = _sticker_snapshot(entry, self.audit)
+            await self.audit.send_event(
+                guild,
+                "sticker_deleted",
+                f"{_display_name(entry.user, 'Кто-то из стаффа')} убрал стикер **{discord.utils.escape_markdown(sticker_name)}**.",
+                actor=entry.user,
+                reason=entry.reason,
+                fields=fields,
+                show_target_field=False,
+                related_users=[entry.user],
+            )
+        elif action_value == 100:
+            event_name, fields = _scheduled_event_snapshot(entry, self.audit)
+            await self.audit.send_event(
+                guild,
+                "scheduled_event_created",
+                f"{_display_name(entry.user, 'Кто-то из стаффа')} создал событие **{discord.utils.escape_markdown(event_name)}**.",
+                actor=entry.user,
+                reason=entry.reason,
+                fields=fields,
+                show_target_field=False,
+                related_channels=[getattr(entry.target, "channel", None), getattr(entry.after, "channel", None)],
+                related_users=[entry.user],
+            )
+        elif action_value == 101:
+            event_name, fields = _scheduled_event_snapshot(entry, self.audit)
+            changes = self.audit.describe_changes(entry)
+            if changes:
+                fields.append(("Что изменилось", changes, False))
+            await self.audit.send_event(
+                guild,
+                "scheduled_event_updated",
+                f"{_display_name(entry.user, 'Кто-то из стаффа')} обновил событие **{discord.utils.escape_markdown(event_name)}**.",
+                actor=entry.user,
+                reason=entry.reason,
+                fields=fields,
+                show_target_field=False,
+                related_channels=[getattr(entry.target, "channel", None), getattr(entry.after, "channel", None)],
+                related_users=[entry.user],
+            )
+        elif action_value == 102:
+            event_name, fields = _scheduled_event_snapshot(entry, self.audit)
+            await self.audit.send_event(
+                guild,
+                "scheduled_event_deleted",
+                f"{_display_name(entry.user, 'Кто-то из стаффа')} отменил событие **{discord.utils.escape_markdown(event_name)}**.",
+                actor=entry.user,
+                reason=entry.reason,
+                fields=fields,
+                show_target_field=False,
+                related_channels=[getattr(entry.before, "channel", None), getattr(entry.target, "channel", None)],
+                related_users=[entry.user],
+            )
         elif action_value == 50:
             webhook_name, fields = _webhook_snapshot(target, self.audit)
             await self.audit.send_event(
@@ -982,6 +1459,123 @@ class AuditCog(commands.Cog):
                 show_target_field=False,
                 related_channels=[getattr(target, "channel", None)],
                 related_users=[entry.user],
+            )
+        elif action_value == 130:
+            sound_name, fields = _soundboard_snapshot(entry)
+            await self.audit.send_event(
+                guild,
+                "soundboard_sound_created",
+                f"{_display_name(entry.user, 'Кто-то из стаффа')} добавил звук **{discord.utils.escape_markdown(sound_name)}** на саунд-панель.",
+                actor=entry.user,
+                reason=entry.reason,
+                fields=fields,
+                show_target_field=False,
+                related_users=[entry.user],
+            )
+        elif action_value == 131:
+            sound_name, fields = _soundboard_snapshot(entry)
+            changes = self.audit.describe_changes(entry)
+            if changes:
+                fields.append(("Что изменилось", changes, False))
+            await self.audit.send_event(
+                guild,
+                "soundboard_sound_updated",
+                f"{_display_name(entry.user, 'Кто-то из стаффа')} обновил звук **{discord.utils.escape_markdown(sound_name)}** на саунд-панели.",
+                actor=entry.user,
+                reason=entry.reason,
+                fields=fields,
+                show_target_field=False,
+                related_users=[entry.user],
+            )
+        elif action_value == 132:
+            sound_name, fields = _soundboard_snapshot(entry)
+            await self.audit.send_event(
+                guild,
+                "soundboard_sound_deleted",
+                f"{_display_name(entry.user, 'Кто-то из стаффа')} убрал звук **{discord.utils.escape_markdown(sound_name)}** с саунд-панели.",
+                actor=entry.user,
+                reason=entry.reason,
+                fields=fields,
+                show_target_field=False,
+                related_users=[entry.user],
+            )
+        elif action_value == 140:
+            rule_name, fields = _automod_rule_snapshot(entry, self.audit)
+            await self.audit.send_event(
+                guild,
+                "automod_rule_created",
+                f"{_display_name(entry.user, 'Кто-то из стаффа')} создал правило автомода **{discord.utils.escape_markdown(rule_name)}**.",
+                actor=entry.user,
+                reason=entry.reason,
+                fields=fields,
+                show_target_field=False,
+                related_users=[entry.user],
+            )
+        elif action_value == 141:
+            rule_name, fields = _automod_rule_snapshot(entry, self.audit)
+            changes = self.audit.describe_changes(entry)
+            if changes:
+                fields.append(("Что изменилось", changes, False))
+            await self.audit.send_event(
+                guild,
+                "automod_rule_updated",
+                f"{_display_name(entry.user, 'Кто-то из стаффа')} подкрутил правило автомода **{discord.utils.escape_markdown(rule_name)}**.",
+                actor=entry.user,
+                reason=entry.reason,
+                fields=fields,
+                show_target_field=False,
+                related_users=[entry.user],
+            )
+        elif action_value == 142:
+            rule_name, fields = _automod_rule_snapshot(entry, self.audit)
+            await self.audit.send_event(
+                guild,
+                "automod_rule_deleted",
+                f"{_display_name(entry.user, 'Кто-то из стаффа')} снял с дежурства правило автомода **{discord.utils.escape_markdown(rule_name)}**.",
+                actor=entry.user,
+                reason=entry.reason,
+                fields=fields,
+                show_target_field=False,
+                related_users=[entry.user],
+            )
+        elif action_value in {143, 144, 145, 146}:
+            extra = entry.extra
+            channel = getattr(extra, "channel", None)
+            rule_name = getattr(extra, "automod_rule_name", "Неизвестное правило")
+            trigger_type = getattr(extra, "automod_rule_trigger_type", None)
+            key_map = {
+                143: "automod_action_blocked",
+                144: "automod_action_flagged",
+                145: "automod_action_timeout",
+                146: "automod_action_quarantined",
+            }
+            description_map = {
+                143: f"Автомод остановил сообщение участника **{_display_name(target)}** ещё на подлёте.",
+                144: f"Автомод поднял флаг на участника **{_display_name(target)}** и позвал модерацию посмотреть.",
+                145: f"Автомод выдал тайм-аут участнику **{_display_name(target)}**.",
+                146: f"Автомод ограничил взаимодействия участнику **{_display_name(target)}**.",
+            }
+            fields = [
+                ("Правило", f"**{discord.utils.escape_markdown(str(rule_name))}**", False),
+                ("Триггер", self.audit.format_change_value(trigger_type) if trigger_type is not None else "Неизвестно", True),
+            ]
+            if channel is not None:
+                fields.append(("Канал", self.audit.format_channel(channel), False))
+            await self.audit.send_event(
+                guild,
+                key_map[action_value],
+                description_map[action_value],
+                actor=entry.user if entry.user is not None else None,
+                target=target,
+                reason=entry.reason,
+                fields=fields,
+                show_actor_field=False,
+                show_target_field=target is not None,
+                target_label="Участник",
+                thumbnail_target=target,
+                related_channels=[channel],
+                related_users=[entry.user, target],
+                include_case_id=action_value in {145, 146},
             )
         elif action_value == 52:
             webhook_name, fields = _webhook_snapshot(target, self.audit)
@@ -1017,7 +1611,6 @@ class AuditCog(commands.Cog):
     async def on_member_join(self, member: discord.Member) -> None:
         if member.bot:
             return
-        age = discord.utils.utcnow() - member.created_at
         await self.audit.send_event(
             member.guild,
             "member_joined",
@@ -1385,19 +1978,138 @@ class AuditCog(commands.Cog):
             return
 
         guild = member.guild
+        active_channel = after.channel or before.channel
+
+        if after.channel is not None:
+            self._start_session(self._voice_sessions, member)
+        if after.channel is not None and after.self_stream:
+            self._start_session(self._stream_sessions, member)
+        if after.channel is not None and after.self_video:
+            self._start_session(self._camera_sessions, member)
+
+        moderation_changes = _format_voice_moderation_flags(before, after)
+        if moderation_changes and active_channel is not None:
+            entry = await self.audit.fetch_recent_audit_entry(
+                guild,
+                actions=[discord.AuditLogAction.member_update],
+                target_id=member.id,
+                max_age_seconds=8,
+            )
+            await self.audit.send_event(
+                guild,
+                "member_voice_moderation_changed",
+                (
+                    f"{_display_name(entry.user, 'Кто-то из стаффа')} "
+                    f"{_voice_moderation_summary(moderation_changes)} участнику **{_display_name(member)}**."
+                ),
+                actor=entry.user if entry else None,
+                target=member,
+                reason=entry.reason if entry else None,
+                fields=[
+                    ("Кто навёл движ", self.audit.format_entity(entry.user) if entry else "Неизвестно", False),
+                    ("Участник", self.audit.format_entity(member), False),
+                    ("Канал", self.audit.format_channel(active_channel), False),
+                    ("Изменения", "\n".join(moderation_changes), False),
+                ],
+                show_target_field=False,
+                thumbnail_target=member,
+                related_channels=[active_channel],
+                related_users=[member, entry.user if entry else None],
+            )
+
+        if before.self_stream != after.self_stream and active_channel is not None:
+            if after.self_stream:
+                self._start_session(self._stream_sessions, member)
+                await self.audit.send_event(
+                    guild,
+                    "member_stream_started",
+                    f"**{_display_name(member)}** запустил стрим в {active_channel.mention}.",
+                    target=member,
+                    fields=[("Канал", self.audit.format_channel(active_channel), False)],
+                    thumbnail_target=member,
+                    related_channels=[active_channel],
+                    related_users=[member],
+                )
+            else:
+                duration = self._stop_session(self._stream_sessions, member)
+                fields = [("Канал", self.audit.format_channel(active_channel), False)]
+                if duration:
+                    fields.append(("Длительность", duration, True))
+                await self.audit.send_event(
+                    guild,
+                    "member_stream_stopped",
+                    f"**{_display_name(member)}** остановил стрим в {active_channel.mention}.",
+                    target=member,
+                    fields=fields,
+                    thumbnail_target=member,
+                    related_channels=[active_channel],
+                    related_users=[member],
+                )
+
+        if before.self_video != after.self_video and active_channel is not None:
+            if after.self_video:
+                self._start_session(self._camera_sessions, member)
+                await self.audit.send_event(
+                    guild,
+                    "member_camera_started",
+                    f"**{_display_name(member)}** включил камеру в {active_channel.mention}.",
+                    target=member,
+                    fields=[("Канал", self.audit.format_channel(active_channel), False)],
+                    thumbnail_target=member,
+                    related_channels=[active_channel],
+                    related_users=[member],
+                )
+            else:
+                duration = self._stop_session(self._camera_sessions, member)
+                fields = [("Канал", self.audit.format_channel(active_channel), False)]
+                if duration:
+                    fields.append(("Длительность", duration, True))
+                await self.audit.send_event(
+                    guild,
+                    "member_camera_stopped",
+                    f"**{_display_name(member)}** выключил камеру в {active_channel.mention}.",
+                    target=member,
+                    fields=fields,
+                    thumbnail_target=member,
+                    related_channels=[active_channel],
+                    related_users=[member],
+                )
+
+        state_changes = _format_voice_flags(before, after)
+        if state_changes and active_channel is not None:
+            await self.audit.send_event(
+                guild,
+                "member_voice_state_changed",
+                f"**{_display_name(member)}** в войсе {_voice_state_summary(state_changes)}.",
+                target=member,
+                fields=[
+                    ("Канал", self.audit.format_channel(active_channel), False),
+                    ("Изменения", "\n".join(state_changes), False),
+                ],
+                related_channels=[active_channel],
+                related_users=[member],
+            )
 
         if before.channel != after.channel:
             if before.channel is not None and after.channel is None:
-                if self.audit.was_recent(guild.id, "member_disconnected", member.id, seconds=8):
-                    return
+                voice_duration = self._stop_session(self._voice_sessions, member)
+                self._stop_session(self._stream_sessions, member)
+                self._stop_session(self._camera_sessions, member)
                 entry = await self.audit.fetch_recent_audit_entry(
                     guild,
                     actions=[discord.AuditLogAction.member_disconnect],
                     target_id=member.id,
                     max_age_seconds=8,
                 )
-                if entry is not None:
+                if entry is not None and not self.audit.was_recent(guild.id, "member_disconnected", member.id, seconds=8):
                     self.audit.remember_recent(guild.id, "member_disconnected", member.id)
+                    fields = [
+                        ("Кто навёл движ", self.audit.format_entity(entry.user), False),
+                        ("Участник", self.audit.format_entity(member), False),
+                        ("Канал", self.audit.format_channel(before.channel), False),
+                    ]
+                    if voice_duration:
+                        fields.append(("Просидел в войсе", voice_duration, True))
                     await self.audit.send_event(
                         guild,
                         "member_disconnected",
@@ -1405,23 +2117,22 @@ class AuditCog(commands.Cog):
                         actor=entry.user,
                         target=member,
                         reason=entry.reason,
-                        fields=[
-                            ("Кто навёл движ", self.audit.format_entity(entry.user), False),
-                            ("Участник", self.audit.format_entity(member), False),
-                            ("Канал", self.audit.format_channel(before.channel), False),
-                        ],
+                        fields=fields,
                         show_target_field=False,
                         thumbnail_target=member,
                         related_channels=[before.channel],
                         related_users=[member, entry.user],
                     )
                     return
+                fields = [("Канал", self.audit.format_channel(before.channel), False)]
+                if voice_duration:
+                    fields.append(("Просидел в войсе", voice_duration, True))
                 await self.audit.send_event(
                     guild,
                     "member_voice_left",
                     f"**{_display_name(member)}** вышел из войса.",
                     target=member,
-                    fields=[("Канал", self.audit.format_channel(before.channel), False)],
+                    fields=fields,
                     related_channels=[before.channel],
                     related_users=[member],
                 )
@@ -1434,16 +2145,15 @@ class AuditCog(commands.Cog):
                     f"**{_display_name(member)}** залетел в войс.",
                     target=member,
                     fields=[("Канал", self.audit.format_channel(after.channel), False)],
+                    thumbnail_target=member,
                     related_channels=[after.channel],
                     related_users=[member],
                 )
                 return
 
             if before.channel is not None and after.channel is not None:
-                if self.audit.was_recent(guild.id, "member_moved", member.id, seconds=8):
-                    return
                 entry = await self.find_member_move_entry(member, after.channel, max_age_seconds=8)
-                if entry is not None:
+                if entry is not None and not self.audit.was_recent(guild.id, "member_moved", member.id, seconds=8):
                     self.audit.remember_recent(guild.id, "member_moved", member.id)
                     await self.audit.send_event(
                         guild,
@@ -1476,56 +2186,11 @@ class AuditCog(commands.Cog):
                         ("Из", self.audit.format_channel(before.channel), True),
                         ("В", self.audit.format_channel(after.channel), True),
                     ],
+                    thumbnail_target=member,
                     related_channels=[before.channel, after.channel],
                     related_users=[member],
                 )
                 return
-
-        moderation_changes = _format_voice_moderation_flags(before, after)
-        active_channel = after.channel or before.channel
-        if moderation_changes and active_channel is not None:
-            entry = await self.audit.fetch_recent_audit_entry(
-                guild,
-                actions=[discord.AuditLogAction.member_update],
-                target_id=member.id,
-                max_age_seconds=8,
-            )
-            await self.audit.send_event(
-                guild,
-                "member_voice_moderation_changed",
-                (
-                    f"{_display_name(entry.user, 'Кто-то из стаффа')} "
-                    f"{_voice_moderation_summary(moderation_changes)} участнику **{_display_name(member)}**."
-                ),
-                actor=entry.user if entry else None,
-                target=member,
-                reason=entry.reason if entry else None,
-                fields=[
-                    ("Кто навёл движ", self.audit.format_entity(entry.user) if entry else "Неизвестно", False),
-                    ("Участник", self.audit.format_entity(member), False),
-                    ("Канал", self.audit.format_channel(active_channel), False),
-                    ("Изменения", "\n".join(moderation_changes), False),
-                ],
-                show_target_field=False,
-                thumbnail_target=member,
-                related_channels=[active_channel],
-                related_users=[member, entry.user if entry else None],
-            )
-
-        state_changes = _format_voice_flags(before, after)
-        if state_changes and active_channel is not None:
-            await self.audit.send_event(
-                guild,
-                "member_voice_state_changed",
-                f"**{_display_name(member)}** в войсе { _voice_state_summary(state_changes) }.",
-                target=member,
-                fields=[
-                    ("Канал", self.audit.format_channel(active_channel), False),
-                    ("Изменения", "\n".join(state_changes), False),
-                ],
-                related_channels=[active_channel],
-                related_users=[member],
-            )
 
 
 def build_bot(config: BotConfig) -> commands.Bot:
