@@ -148,12 +148,7 @@ async def handle_on_voice_state_update(
             voice_duration = cog._stop_session(cog._voice_sessions, member)
             cog._stop_session(cog._stream_sessions, member)
             cog._stop_session(cog._camera_sessions, member)
-            entry = await cog.audit.fetch_recent_audit_entry(
-                guild,
-                actions=[discord.AuditLogAction.member_disconnect],
-                target_id=member.id,
-                max_age_seconds=8,
-            )
+            entry = await cog.find_member_disconnect_entry(member, max_age_seconds=10)
             if entry is not None and not cog.audit.was_recent(guild.id, "member_disconnected", member.id, seconds=8):
                 cog.audit.remember_recent(guild.id, "member_disconnected", member.id)
                 await cog._log_voice_session_finished(
