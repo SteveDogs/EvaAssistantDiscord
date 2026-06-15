@@ -1,0 +1,16 @@
+[project]
+name = "eva-assistant-discord"
+version = "0.1.0"
+description = "Stylish Discord audit and moderation logging bot by Steve Dogs Studio."
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [
+  { name = "Steve Dogs Studio", email = "istevedogs@gmail.com" }
+]
+dependencies = [
+  "discord.py>=2.7,<3.0"
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
