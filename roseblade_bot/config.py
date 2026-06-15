@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 from pathlib import Path
+import re
 
 
 def _load_dotenv(dotenv_path: Path) -> None:
@@ -50,13 +51,13 @@ def _parse_nickname_prefix_rules(name: str) -> dict[int, str]:
         return {}
 
     rules: dict[int, str] = {}
-    for chunk in raw_value.split(";"):
+    for chunk in re.split(r"[;,]", raw_value):
         entry = chunk.strip()
         if not entry:
             continue
         if "=" not in entry:
             raise RuntimeError(
-                f"{name} has invalid entry '{entry}'. Use format ROLE_ID=PREFIX;ROLE_ID=PREFIX."
+                f"{name} has invalid entry '{entry}'. Use format ROLE_ID=PREFIX;ROLE_ID=PREFIX or ROLE_ID=PREFIX,ROLE_ID=PREFIX."
             )
         role_id_raw, prefix_raw = entry.split("=", 1)
         role_id = int(role_id_raw.strip())
