@@ -61,8 +61,10 @@ async def handle_on_message(cog: AuditCog, message: discord.Message) -> None:
             allowed_mentions=discord.AllowedMentions.none(),
         )
     except (discord.Forbidden, discord.HTTPException):
+        cog.log_banter_decision(message, decision="fail", reason="reply_send_error")
         return
     cog.remember_banter_reply(message, reply_text)
+    cog.log_banter_decision(message, decision="sent", reason="reply_posted")
 
 
 async def handle_on_message_delete(cog: AuditCog, message: discord.Message) -> None:

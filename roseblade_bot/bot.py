@@ -5,9 +5,11 @@ Copyright (c) 2026 Steve Dogs Studio.
 
 from __future__ import annotations
 
+from collections import deque
 from datetime import date, datetime, timedelta
 import random
 from typing import Any
+import unicodedata
 
 import discord
 from discord import app_commands
@@ -67,6 +69,8 @@ class AuditCog(commands.Cog):
         self._stream_sessions: dict[tuple[int, int], datetime] = {}
         self._camera_sessions: dict[tuple[int, int], datetime] = {}
         self._managed_nickname_updates: dict[tuple[int, int], datetime] = {}
+        self._nickname_sync_queue: deque[tuple[int, int]] = deque()
+        self._nickname_sync_pending: set[tuple[int, int]] = set()
         self._chat_banter_last_channel_reply: dict[tuple[int, int], datetime] = {}
         self._chat_banter_last_user_reply: dict[tuple[int, int], datetime] = {}
         self._chat_banter_last_channel_text: dict[tuple[int, int], str] = {}
@@ -111,23 +115,79 @@ class AuditCog(commands.Cog):
     def _default_member_name(member: discord.Member) -> str:
         return (member.global_name or member.name).strip()
 
-    def _configured_prefixes(self, member: discord.Member) -> list[str]:
+    @staticmethod
+    def _normalize_prefix_token(value: str) -> str:
+        normalized = unicodedata.normalize("NFKC", value)
+        return "".join(ch for ch in normalized if ch not in {"\ufe0e", "\ufe0f"}).strip()
+
+    def _prefix_variants(self, prefix: str) -> list[str]:
+        variants: list[str] = []
+        seen: set[str] = set()
+        for candidate in (prefix.strip(), self._normalize_prefix_token(prefix)):
+            cleaned = candidate.strip()
+            if cleaned and cleaned not in seen:
+                seen.add(cleaned)
+                variants.append(cleaned)
+        variants.sort(key=len, reverse=True)
+        return variants
+
+    def _nickname_prefix_signature(self) -> str:
+        role_chunks = [
+            f"{role_id}={self._normalize_prefix_token(prefix)}"
+            for role_id, prefix in sorted(self.config.nickname_prefix_rules.items())
+        ]
+        legacy_chunks = [self._normalize_prefix_token(prefix) for prefix in sorted(self.config.nickname_prefix_legacy_prefixes)]
+        excluded_chunks = [str(user_id) for user_id in sorted(self.config.nickname_prefix_excluded_user_ids)]
+        return "|".join(role_chunks) + "::" + "|".join(legacy_chunks) + "::" + "|".join(excluded_chunks)
+
+    def _nickname_prefix_state(self, guild_id: int) -> dict[str, Any]:
+        return self.store.get_service_state(guild_id, "nickname_prefix")
+
+    def _persist_known_nickname_prefixes(self, guild_id: int) -> set[str]:
+        state = self._nickname_prefix_state(guild_id)
+        known_prefixes = {str(value).strip() for value in state.get("known_prefixes", []) if str(value).strip()}
+        known_prefixes.update(prefix.strip() for prefix in self.config.nickname_prefix_rules.values() if prefix.strip())
+        known_prefixes.update(prefix.strip() for prefix in self.config.nickname_prefix_legacy_prefixes if prefix.strip())
+        updated = sorted(known_prefixes)
+        if updated != state.get("known_prefixes", []):
+            state["known_prefixes"] = updated
+            self.store.set_service_state(guild_id, "nickname_prefix", state)
+        return set(updated)
+
+    def _known_nickname_prefixes(self, guild_id: int) -> list[str]:
+        known_prefixes = self._persist_known_nickname_prefixes(guild_id)
+        variants: list[str] = []
+        seen_variants: set[str] = set()
+        for prefix in known_prefixes:
+            for variant in self._prefix_variants(prefix):
+                if variant not in seen_variants:
+                    seen_variants.add(variant)
+                    variants.append(variant)
+        variants.sort(key=len, reverse=True)
+        return variants
+
+    def queue_member_nickname_sync(self, member: discord.Member) -> bool:
+        key = self._session_key(member)
+        if key in self._nickname_sync_pending:
+            return False
+        self._nickname_sync_pending.add(key)
+        self._nickname_sync_queue.append(key)
+        return True
+
+    def _configured_prefix(self, member: discord.Member) -> str | None:
         configured_roles = [
             role
             for role in member.roles
             if role.id in self.config.nickname_prefix_rules and not role.is_default()
         ]
-        configured_roles.sort(key=lambda role: (-role.position, role.id))
-        prefixes: list[str] = []
-        for role in configured_roles:
-            prefix = self.config.nickname_prefix_rules[role.id]
-            if prefix not in prefixes:
-                prefixes.append(prefix)
-        return prefixes
+        if not configured_roles:
+            return None
+        configured_roles.sort(key=lambda role: (-role.position, -role.id))
+        return self.config.nickname_prefix_rules[configured_roles[0].id]
 
-    def _strip_known_prefixes(self, value: str) -> str:
+    def _strip_known_prefixes(self, guild_id: int, value: str) -> str:
         cleaned = value.strip()
-        known_prefixes = sorted(set(self.config.nickname_prefix_rules.values()), key=len, reverse=True)
+        known_prefixes = self._known_nickname_prefixes(guild_id)
         changed = True
         while changed and cleaned:
             changed = False
@@ -146,27 +206,68 @@ class AuditCog(commands.Cog):
         return nickname[:32].rstrip()
 
     def _desired_member_nickname(self, member: discord.Member) -> str | None:
-        prefixes = self._configured_prefixes(member)
+        prefix = self._configured_prefix(member)
         raw_current = member.nick or self._default_member_name(member)
-        base_name = self._strip_known_prefixes(raw_current) or self._default_member_name(member)
+        base_name = self._strip_known_prefixes(member.guild.id, raw_current) or self._default_member_name(member)
 
-        if prefixes:
-            prefix_text = " ".join(prefixes)
-            desired = self._truncate_nickname(f"{prefix_text} {base_name}".strip())
-            return desired or self._truncate_nickname(prefix_text)
+        if prefix:
+            desired = self._truncate_nickname(f"{prefix} {base_name}".strip())
+            return desired or self._truncate_nickname(prefix)
 
         if member.nick is None:
             return None
 
-        stripped_nick = self._strip_known_prefixes(member.nick)
+        stripped_nick = self._strip_known_prefixes(member.guild.id, member.nick)
         if not stripped_nick:
             return None
         if stripped_nick == self._default_member_name(member):
             return None
         return self._truncate_nickname(stripped_nick)
 
+    def _member_should_participate_in_nickname_sync(self, member: discord.Member) -> bool:
+        if member.bot or member.id in self.config.nickname_prefix_excluded_user_ids:
+            return False
+        if any(role.id in self.config.nickname_prefix_rules for role in member.roles if not role.is_default()):
+            return True
+        if member.nick:
+            for prefix in self._known_nickname_prefixes(member.guild.id):
+                if member.nick.startswith(prefix) or member.nick.startswith(f"{prefix} "):
+                    return True
+        return False
+
+    async def queue_guild_nickname_resync(
+        self,
+        guild: discord.Guild,
+        *,
+        reason: str,
+        full: bool,
+    ) -> int:
+        if not self.config.enable_members_intent or not self.config.nickname_prefix_rules:
+            return 0
+        self._persist_known_nickname_prefixes(guild.id)
+        if not guild.chunked:
+            try:
+                await guild.chunk(cache=True)
+            except (discord.Forbidden, discord.HTTPException):
+                pass
+
+        queued = 0
+        for member in guild.members:
+            if full or self._member_should_participate_in_nickname_sync(member):
+                if self.queue_member_nickname_sync(member):
+                    queued += 1
+
+        state = self._nickname_prefix_state(guild.id)
+        state["last_queue_reason"] = reason
+        state["last_queue_at"] = discord.utils.utcnow().isoformat()
+        state["last_queue_size"] = queued
+        self.store.set_service_state(guild.id, "nickname_prefix", state)
+        return queued
+
     async def enforce_member_nickname(self, member: discord.Member) -> bool:
         if member.bot or not self.config.nickname_prefix_rules:
+            return False
+        if member.id in self.config.nickname_prefix_excluded_user_ids:
             return False
         me = member.guild.me
         if me is None or not me.guild_permissions.manage_nicknames:
@@ -183,13 +284,13 @@ class AuditCog(commands.Cog):
             return False
 
         try:
-            self._remember_managed_nickname_update(member)
             await member.edit(
                 nick=desired_nick,
                 reason="EVA Assistant: синхронизация префикса ника по ролям",
             )
         except (discord.Forbidden, discord.HTTPException):
             return False
+        self._remember_managed_nickname_update(member)
         return True
 
     @staticmethod
@@ -251,10 +352,18 @@ class AuditCog(commands.Cog):
         self.bot.tree.on_error = self.on_app_command_error
         if self.steam_digest.is_configured and not self.steam_digest_scheduler.is_running():
             self.steam_digest_scheduler.start()
+        if self.config.enable_members_intent and self.config.nickname_prefix_rules and not self.nickname_sync_worker.is_running():
+            self.nickname_sync_worker.start()
+        if self.config.enable_members_intent and self.config.nickname_prefix_rules and not self.nickname_resync_scheduler.is_running():
+            self.nickname_resync_scheduler.start()
 
     def cog_unload(self) -> None:
         if self.steam_digest_scheduler.is_running():
             self.steam_digest_scheduler.cancel()
+        if self.nickname_sync_worker.is_running():
+            self.nickname_sync_worker.cancel()
+        if self.nickname_resync_scheduler.is_running():
+            self.nickname_resync_scheduler.cancel()
 
     async def on_app_command_error(
         self,
@@ -301,9 +410,74 @@ class AuditCog(commands.Cog):
 
         await self.audit.ensure_guild_setup(guild, category_id=self.config.audit_category_id)
         if self.config.enable_members_intent and self.config.nickname_prefix_rules:
-            for member in guild.members:
-                await self.enforce_member_nickname(member)
+            service_state = self._nickname_prefix_state(guild.id)
+            signature = self._nickname_prefix_signature()
+            self._persist_known_nickname_prefixes(guild.id)
+            if service_state.get("signature") != signature:
+                queued = await self.queue_guild_nickname_resync(
+                    guild,
+                    reason="config_signature_changed",
+                    full=True,
+                )
+                service_state["signature"] = signature
+                service_state["last_bootstrap_queue_at"] = discord.utils.utcnow().isoformat()
+                service_state["last_bootstrap_queue_size"] = queued
+                self.store.set_service_state(guild.id, "nickname_prefix", service_state)
         self._bootstrapped_guild_ids.add(guild.id)
+
+    @tasks.loop(seconds=1.5)
+    async def nickname_sync_worker(self) -> None:
+        if not self._nickname_sync_queue:
+            return
+        guild_id, user_id = self._nickname_sync_queue.popleft()
+        self._nickname_sync_pending.discard((guild_id, user_id))
+
+        guild = self.bot.get_guild(guild_id)
+        if guild is None:
+            return
+
+        member: discord.Member | None = None
+        if self.config.enable_members_intent:
+            try:
+                member = await guild.fetch_member(user_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                member = guild.get_member(user_id)
+        else:
+            member = guild.get_member(user_id)
+        if member is None:
+            return
+
+        await self.enforce_member_nickname(member)
+
+    @tasks.loop(minutes=5)
+    async def nickname_resync_scheduler(self) -> None:
+        if not self.config.enable_members_intent or not self.config.nickname_prefix_rules:
+            return
+        if self.config.nickname_prefix_resync_minutes <= 0:
+            return
+
+        now = discord.utils.utcnow()
+        for guild in self.bot.guilds:
+            state = self._nickname_prefix_state(guild.id)
+            last_scan_raw = state.get("last_resync_scan_at")
+            last_scan: datetime | None = None
+            if isinstance(last_scan_raw, str):
+                try:
+                    last_scan = datetime.fromisoformat(last_scan_raw)
+                except ValueError:
+                    last_scan = None
+            if last_scan is not None and now - last_scan < timedelta(minutes=self.config.nickname_prefix_resync_minutes):
+                continue
+
+            queued = await self.queue_guild_nickname_resync(
+                guild,
+                reason="periodic_resync",
+                full=False,
+            )
+            state = self._nickname_prefix_state(guild.id)
+            state["last_resync_scan_at"] = now.isoformat()
+            state["last_resync_scan_queued"] = queued
+            self.store.set_service_state(guild.id, "nickname_prefix", state)
 
     @tasks.loop(minutes=1)
     async def steam_digest_scheduler(self) -> None:
@@ -551,6 +725,33 @@ class AuditCog(commands.Cog):
         category_id = getattr(channel, "category_id", None)
         return category_id is not None and int(category_id) in ignored_category_ids
 
+    @staticmethod
+    def _banter_snippet(text: str, *, limit: int = 96) -> str:
+        single_line = " ".join(text.split())
+        if len(single_line) <= limit:
+            return single_line
+        return single_line[: limit - 3] + "..."
+
+    def log_banter_decision(
+        self,
+        message: discord.Message,
+        *,
+        decision: str,
+        reason: str,
+    ) -> None:
+        guild_id = message.guild.id if message.guild is not None else "dm"
+        channel_id = getattr(message.channel, "id", "unknown")
+        user_id = getattr(message.author, "id", "unknown")
+        print(
+            "[EVA][banter]"
+            f" decision={decision}"
+            f" reason={reason}"
+            f" guild={guild_id}"
+            f" channel={channel_id}"
+            f" user={user_id}"
+            f" content={self._banter_snippet(message.content)!r}"
+        )
+
     def should_reply_with_banter(self, message: discord.Message) -> bool:
         if not self.config.chat_banter_enabled:
             return False
@@ -562,11 +763,16 @@ class AuditCog(commands.Cog):
             return False
         if message.webhook_id is not None:
             return False
+        has_trigger = CHAT_BANTER.contains_trigger(message.content)
         if isinstance(message.channel, (discord.TextChannel, discord.Thread)) and self.is_ignored_channel(message.guild, message.channel):
+            if has_trigger:
+                self.log_banter_decision(message, decision="skip", reason="ignored_channel")
             return False
         if isinstance(message.channel, (discord.TextChannel, discord.Thread)) and self.is_audit_channel(message.guild, message.channel):
+            if has_trigger:
+                self.log_banter_decision(message, decision="skip", reason="audit_channel")
             return False
-        if not CHAT_BANTER.contains_trigger(message.content):
+        if not has_trigger:
             return False
 
         now = discord.utils.utcnow()
@@ -575,11 +781,19 @@ class AuditCog(commands.Cog):
         channel_stamp = self._chat_banter_last_channel_reply.get(channel_key)
         user_stamp = self._chat_banter_last_user_reply.get(user_key)
         if channel_stamp is not None and now - channel_stamp < timedelta(seconds=self.config.chat_banter_channel_cooldown_seconds):
+            self.log_banter_decision(message, decision="skip", reason="channel_cooldown")
             return False
         if user_stamp is not None and now - user_stamp < timedelta(seconds=self.config.chat_banter_user_cooldown_seconds):
+            self.log_banter_decision(message, decision="skip", reason="user_cooldown")
             return False
         if random.random() > self.config.chat_banter_reply_chance:
+            self.log_banter_decision(
+                message,
+                decision="skip",
+                reason=f"chance_{self.config.chat_banter_reply_chance:.2f}",
+            )
             return False
+        self.log_banter_decision(message, decision="pass", reason="trigger_matched")
         return True
 
     def remember_banter_reply(self, message: discord.Message, reply_text: str) -> None:
@@ -612,7 +826,9 @@ class AuditCog(commands.Cog):
         key = (target.guild.id, target.id, actor.id, audit_entry_id)
         stamp = self._protected_voice_guard_recent.get(key)
         now = discord.utils.utcnow()
-        cooldown_seconds = 5 if audit_entry_id is None else 120
+        # Discord audit log for disconnects can lag and briefly return the previous entry again.
+        # Keep the cooldown short so repeated real disconnects after a rejoin still trigger the guard.
+        cooldown_seconds = 5
         if stamp is not None and now - stamp <= timedelta(seconds=cooldown_seconds):
             return
         self._protected_voice_guard_recent[key] = now
@@ -666,6 +882,7 @@ class AuditCog(commands.Cog):
     async def audit_status(self, interaction: discord.Interaction) -> None:
         assert interaction.guild is not None
         saved = self.store.get_guild(interaction.guild.id)
+        nickname_state = self._nickname_prefix_state(interaction.guild.id)
 
         lines = [f"Категория ID: `{saved.get('category_id')}`"]
         for key, definition in CHANNEL_DEFINITIONS.items():
@@ -683,6 +900,14 @@ class AuditCog(commands.Cog):
             f" message_content={_bool_label(self.config.enable_message_content_intent)}"
         )
         lines.append(f"Префиксы ников: `{len(self.config.nickname_prefix_rules)}`")
+        lines.append(
+            "Nick sync:"
+            f" legacy={len(self.config.nickname_prefix_legacy_prefixes)},"
+            f" excluded={len(self.config.nickname_prefix_excluded_user_ids)},"
+            f" interval={self.config.nickname_prefix_resync_minutes}m,"
+            f" pending={len(self._nickname_sync_queue)},"
+            f" last_reason={nickname_state.get('last_queue_reason', 'n/a')}"
+        )
         protected_voice_guard_count = len(self.get_protected_voice_guard_user_ids(interaction.guild))
         lines.append(
             "Voice guard:"
@@ -727,6 +952,25 @@ class AuditCog(commands.Cog):
         )
 
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+    @app_commands.command(name="nick_resync", description="Поставить пересборку ник-префиксов в очередь")
+    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.guild_only()
+    async def nick_resync(self, interaction: discord.Interaction) -> None:
+        assert interaction.guild is not None
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        queued = await self.queue_guild_nickname_resync(
+            interaction.guild,
+            reason="manual_resync",
+            full=False,
+        )
+        await interaction.followup.send(
+            (
+                f"Поставила в очередь **{queued}** участников для пересинхронизации ников. "
+                f"Worker идёт по одному участнику примерно раз в **1.5 сек**."
+            ),
+            ephemeral=True,
+        )
 
     @app_commands.command(name="steam_digest_now", description="Отправить тестовый Steam-дайджест в текущий канал")
     @app_commands.checks.has_permissions(administrator=True)
@@ -1227,7 +1471,7 @@ class AuditCog(commands.Cog):
                     related_roles=added_roles,
                 )
                 if target_member is not None:
-                    await self.enforce_member_nickname(target_member)
+                    self.queue_member_nickname_sync(target_member)
 
             if removed_roles:
                 if target_id:
@@ -1249,7 +1493,7 @@ class AuditCog(commands.Cog):
                     related_roles=removed_roles,
                 )
                 if target_member is not None:
-                    await self.enforce_member_nickname(target_member)
+                    self.queue_member_nickname_sync(target_member)
         elif action_value == 28:
             await self.audit.send_event(
                 guild,
@@ -1685,7 +1929,7 @@ class AuditCog(commands.Cog):
     async def on_member_join(self, member: discord.Member) -> None:
         if member.bot:
             return
-        await self.enforce_member_nickname(member)
+        self.queue_member_nickname_sync(member)
         await self.audit.send_event(
             member.guild,
             "member_joined",
@@ -1854,7 +2098,7 @@ class AuditCog(commands.Cog):
             )
 
         if before.nick != after.nick or before.roles != after.roles:
-            await self.enforce_member_nickname(after)
+            self.queue_member_nickname_sync(after)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:

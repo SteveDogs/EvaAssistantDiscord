@@ -36,6 +36,9 @@ class BotConfig:
     enable_members_intent: bool
     enable_message_content_intent: bool
     nickname_prefix_rules: dict[int, str]
+    nickname_prefix_legacy_prefixes: frozenset[str]
+    nickname_prefix_excluded_user_ids: frozenset[int]
+    nickname_prefix_resync_minutes: int
     ignored_channel_ids: frozenset[int]
     protected_voice_guard_enabled: bool
     protected_voice_guard_user_ids: frozenset[int]
@@ -120,6 +123,19 @@ def _parse_nickname_prefix_rules(name: str) -> dict[int, str]:
     return rules
 
 
+def _parse_string_set_env(name: str) -> frozenset[str]:
+    raw_value = os.getenv(name, "").strip()
+    if not raw_value:
+        return frozenset()
+
+    values: set[str] = set()
+    for chunk in re.split(r"[;,]", raw_value):
+        entry = chunk.strip()
+        if entry:
+            values.add(entry)
+    return frozenset(values)
+
+
 def load_config(base_dir: Path | None = None) -> BotConfig:
     root_dir = base_dir or Path.cwd()
     _load_dotenv(root_dir / ".env")
@@ -139,6 +155,9 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
     enable_members_intent = _parse_bool_env("ENABLE_MEMBERS_INTENT", default=False)
     enable_message_content_intent = _parse_bool_env("ENABLE_MESSAGE_CONTENT_INTENT", default=False)
     nickname_prefix_rules = _parse_nickname_prefix_rules("NICK_PREFIX_RULES")
+    nickname_prefix_legacy_prefixes = _parse_string_set_env("NICK_PREFIX_LEGACY_PREFIXES")
+    nickname_prefix_excluded_user_ids = _parse_id_set_env("NICK_PREFIX_EXCLUDED_USER_IDS")
+    nickname_prefix_resync_minutes = max(0, _parse_int_env("NICK_PREFIX_RESYNC_MINUTES", default=180))
     ignored_channel_ids = _parse_id_set_env("IGNORED_CHANNEL_IDS")
     protected_voice_guard_enabled = _parse_bool_env("PROTECTED_VOICE_GUARD_ENABLED", default=False)
     protected_voice_guard_user_ids = _parse_id_set_env("PROTECTED_VOICE_GUARD_USER_IDS")
@@ -173,6 +192,9 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
         enable_members_intent=enable_members_intent,
         enable_message_content_intent=enable_message_content_intent,
         nickname_prefix_rules=nickname_prefix_rules,
+        nickname_prefix_legacy_prefixes=nickname_prefix_legacy_prefixes,
+        nickname_prefix_excluded_user_ids=nickname_prefix_excluded_user_ids,
+        nickname_prefix_resync_minutes=nickname_prefix_resync_minutes,
         ignored_channel_ids=ignored_channel_ids,
         protected_voice_guard_enabled=protected_voice_guard_enabled,
         protected_voice_guard_user_ids=protected_voice_guard_user_ids,
