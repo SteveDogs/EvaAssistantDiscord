@@ -142,11 +142,22 @@ class PubgLookupService:
     def channel_count(self) -> int:
         return len(self.config.pubg_lookup_channel_ids)
 
+    def allowed_role_count(self) -> int:
+        return len(self.config.pubg_lookup_allowed_role_ids)
+
     def has_steam_key(self) -> bool:
         return bool(self.config.steam_api_key)
 
     def is_enabled_for_channel(self, channel_id: int) -> bool:
         return self.is_enabled and channel_id in self.config.pubg_lookup_channel_ids
+
+    def member_has_access(self, member: discord.Member) -> bool:
+        if member.id == member.guild.owner_id:
+            return True
+        allowed_role_ids = self.config.pubg_lookup_allowed_role_ids
+        if not allowed_role_ids:
+            return True
+        return any(role.id in allowed_role_ids for role in member.roles if not role.is_default())
 
     def _normalize_nickname(self, nickname: str) -> str:
         return nickname.strip().lower()
@@ -262,6 +273,21 @@ class PubgLookupService:
             ),
             color=discord.Colour.orange(),
             retry_after_seconds=seconds,
+        )
+
+    def build_access_denied_result(self) -> PubgLookupResult:
+        return PubgLookupResult(
+            ok=False,
+            found=False,
+            rate_limited=False,
+            needs_nickname=False,
+            nickname=None,
+            title="Сюда по пропуску, солнышко.",
+            description=(
+                "Эта PUBG-проверка доступна не всем подряд. "
+                "Нужна одна из ролей, которые сервер выдал для этой функции."
+            ),
+            color=discord.Colour.dark_gold(),
         )
 
     def _request_json(self, url: str) -> tuple[Any, Any]:
@@ -547,8 +573,20 @@ class PubgLookupService:
                 pass
             return True
 
-        if message.guild is None:
+        if message.guild is None or not isinstance(message.author, discord.Member):
             return False
+
+        if not self.member_has_access(message.author):
+            result = self.build_access_denied_result()
+            try:
+                await message.reply(
+                    embed=self.render_embed(result),
+                    mention_author=False,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except (discord.Forbidden, discord.HTTPException):
+                pass
+            return True
 
         if not self.is_configured:
             result = PubgLookupResult(

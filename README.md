@@ -138,6 +138,7 @@ CHAT_BANTER_CHANNEL_COOLDOWN_SECONDS=120
 CHAT_BANTER_USER_COOLDOWN_SECONDS=300
 PUBG_LOOKUP_ENABLED=false
 PUBG_LOOKUP_CHANNEL_IDS=1354908421811601520
+PUBG_LOOKUP_ALLOWED_ROLE_IDS=1389394678561902652;1354908419567521986
 PUBG_PLATFORM=steam
 PUBG_LOOKUP_INCLUDE_LIFETIME_STATS=false
 PUBG_LOOKUP_CACHE_TTL_SECONDS=900
@@ -248,6 +249,7 @@ EVA умеет в отдельном чате отвечать на обраще
 Как это устроено в текущей версии:
 
 - EVA реагирует только в каналах из `PUBG_LOOKUP_CHANNEL_IDS`
+- если `PUBG_LOOKUP_ALLOWED_ROLE_IDS` заполнен, пользоваться проверкой смогут только владелец сервера и участники с этими ролями
 - сообщение должно начинаться с обращения к Еве и содержать просьбу посмотреть ник PUBG
 - основной запрос идёт через официальный PUBG API по `playerName`
 - по нику EVA может показать статус аккаунта, тип бана, shard, clanId и число недавних матчей
@@ -264,6 +266,7 @@ EVA умеет в отдельном чате отвечать на обраще
 ```env
 PUBG_LOOKUP_ENABLED=true
 PUBG_LOOKUP_CHANNEL_IDS=1354908421811601520
+PUBG_LOOKUP_ALLOWED_ROLE_IDS=1389394678561902652;1354908419567521986
 PUBG_PLATFORM=steam
 PUBG_LOOKUP_INCLUDE_LIFETIME_STATS=false
 PUBG_LOOKUP_CACHE_TTL_SECONDS=900
@@ -278,6 +281,11 @@ STEAM_API_KEY=your_steam_api_key
 - простой поиск по нику стоит `1` rate-limited запрос
 - поиск по нику плюс lifetime-статы стоит уже `2` rate-limited запроса
 - EVA поэтому использует кэш и user cooldown, чтобы чат не сжигал лимит впустую
+
+По доступу:
+
+- если `PUBG_LOOKUP_ALLOWED_ROLE_IDS` пустой, проверкой могут пользоваться все, у кого есть доступ к каналу
+- если список заполнен, EVA будет отвечать только владельцу сервера и участникам с одной из указанных ролей
 
 Что EVA реально может достать из PUBG API:
 
