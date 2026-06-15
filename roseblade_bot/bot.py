@@ -8,6 +8,7 @@ from __future__ import annotations
 import io
 from collections.abc import Sequence
 from datetime import datetime, timedelta
+import random
 from typing import Any
 
 import discord
@@ -17,6 +18,7 @@ from discord.ext import commands
 from roseblade_bot import APP_NAME, APP_CODENAME
 from roseblade_bot.audit_definitions import CHANNEL_DEFINITIONS, EVENT_CHOICES, EVENT_DEFINITIONS
 from roseblade_bot.audit_logger import AuditLogger
+from roseblade_bot.chat_banter import CHAT_BANTER
 from roseblade_bot.config import BotConfig, load_config
 from roseblade_bot.storage import JsonStateStore
 
@@ -484,6 +486,8 @@ class AuditCog(commands.Cog):
         self._stream_sessions: dict[tuple[int, int], datetime] = {}
         self._camera_sessions: dict[tuple[int, int], datetime] = {}
         self._managed_nickname_updates: dict[tuple[int, int], datetime] = {}
+        self._chat_banter_last_channel_reply: dict[tuple[int, int], datetime] = {}
+        self._chat_banter_last_user_reply: dict[tuple[int, int], datetime] = {}
         self.audit = AuditLogger(
             store=store,
             default_category_name=config.audit_category_name,
@@ -823,6 +827,49 @@ class AuditCog(commands.Cog):
         except (discord.Forbidden, discord.HTTPException):
             return None
 
+    def is_audit_channel(self, guild: discord.Guild, channel: discord.abc.GuildChannel | discord.Thread | None) -> bool:
+        if channel is None:
+            return False
+        saved = self.store.get_guild(guild.id)
+        if int(channel.id) in {int(value) for value in saved["channels"].values()}:
+            return True
+        category_id = getattr(channel, "category_id", None)
+        return category_id is not None and int(category_id) == int(saved.get("category_id") or 0)
+
+    def should_reply_with_banter(self, message: discord.Message) -> bool:
+        if not self.config.chat_banter_enabled:
+            return False
+        if message.guild is None or message.author.bot:
+            return False
+        if not message.content or not message.content.strip():
+            return False
+        if message.type not in {discord.MessageType.default, discord.MessageType.reply}:
+            return False
+        if message.webhook_id is not None:
+            return False
+        if isinstance(message.channel, (discord.TextChannel, discord.Thread)) and self.is_audit_channel(message.guild, message.channel):
+            return False
+        if not CHAT_BANTER.contains_trigger(message.content):
+            return False
+
+        now = discord.utils.utcnow()
+        channel_key = (message.guild.id, message.channel.id)
+        user_key = (message.guild.id, message.author.id)
+        channel_stamp = self._chat_banter_last_channel_reply.get(channel_key)
+        user_stamp = self._chat_banter_last_user_reply.get(user_key)
+        if channel_stamp is not None and now - channel_stamp < timedelta(seconds=self.config.chat_banter_channel_cooldown_seconds):
+            return False
+        if user_stamp is not None and now - user_stamp < timedelta(seconds=self.config.chat_banter_user_cooldown_seconds):
+            return False
+        if random.random() > self.config.chat_banter_reply_chance:
+            return False
+        return True
+
+    def remember_banter_reply(self, message: discord.Message) -> None:
+        now = discord.utils.utcnow()
+        self._chat_banter_last_channel_reply[(message.guild.id, message.channel.id)] = now  # type: ignore[arg-type]
+        self._chat_banter_last_user_reply[(message.guild.id, message.author.id)] = now  # type: ignore[arg-type]
+
     @app_commands.command(name="audit_setup", description="Создать категорию и каналы для аудита")
     @app_commands.describe(category_name="Название категории аудита")
     @app_commands.checks.has_permissions(administrator=True)
@@ -863,6 +910,12 @@ class AuditCog(commands.Cog):
             f" message_content={_bool_label(self.config.enable_message_content_intent)}"
         )
         lines.append(f"Префиксы ников: `{len(self.config.nickname_prefix_rules)}`")
+        lines.append(
+            "Chat EVA:"
+            f" enabled={_bool_label(self.config.chat_banter_enabled)},"
+            f" chance={self.config.chat_banter_reply_chance:.2f},"
+            f" variants={CHAT_BANTER.reply_variants_count}"
+        )
         ignored = saved["ignored"]
         lines.append(
             "Ignore:"
@@ -1960,6 +2013,22 @@ class AuditCog(commands.Cog):
 
         if before.nick != after.nick or before.roles != after.roles:
             await self.enforce_member_nickname(after)
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message) -> None:
+        if not self.should_reply_with_banter(message):
+            return
+
+        reply_text = CHAT_BANTER.render_reply(_display_name(message.author))
+        try:
+            await message.reply(
+                reply_text,
+                mention_author=False,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            return
+        self.remember_banter_reply(message)
 
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message) -> None:
