@@ -129,10 +129,12 @@ class AuditLogger:
         store: JsonStateStore,
         default_category_name: str,
         default_category_id: int | None = None,
+        static_ignored_channel_ids: Iterable[int] = (),
     ) -> None:
         self.store = store
         self.default_category_name = default_category_name
         self.default_category_id = default_category_id
+        self.static_ignored_channel_ids = {int(value) for value in static_ignored_channel_ids}
         self._recent_events: dict[tuple[int, str, int], datetime] = {}
         self.history_path = store.path.parent / "audit_history.jsonl"
 
@@ -237,21 +239,31 @@ class AuditLogger:
         event_key: str,
         *,
         related_channels: Sequence[discord.abc.GuildChannel | discord.Thread | None] | None = None,
+        related_channel_ids: Sequence[int | None] | None = None,
         related_users: Sequence[discord.Member | discord.User | None] | None = None,
         related_roles: Sequence[discord.Role | None] | None = None,
     ) -> bool:
         if not self.store.is_event_enabled(guild.id, event_key):
             return False
 
-        ignored_channel_ids = self.store.get_ignored_ids(guild.id, "channel_ids")
+        ignored_channel_ids = self.store.get_ignored_ids(guild.id, "channel_ids") | self.static_ignored_channel_ids
         ignored_category_ids = self.store.get_ignored_ids(guild.id, "category_ids")
         ignored_user_ids = self.store.get_ignored_ids(guild.id, "user_ids")
         ignored_role_ids = self.store.get_ignored_ids(guild.id, "role_ids")
+
+        for channel_id in related_channel_ids or ():
+            if channel_id is None:
+                continue
+            if int(channel_id) in ignored_channel_ids:
+                return False
 
         for channel in related_channels or ():
             if channel is None:
                 continue
             if int(channel.id) in ignored_channel_ids:
+                return False
+            parent_id = getattr(channel, "parent_id", None)
+            if parent_id is not None and int(parent_id) in ignored_channel_ids:
                 return False
             category_id = getattr(channel, "category_id", None)
             if category_id is not None and int(category_id) in ignored_category_ids:
@@ -287,6 +299,7 @@ class AuditLogger:
         target_label: str | None = None,
         thumbnail_target: Any | None = None,
         related_channels: Sequence[discord.abc.GuildChannel | discord.Thread | None] | None = None,
+        related_channel_ids: Sequence[int | None] | None = None,
         related_users: Sequence[discord.Member | discord.User | None] | None = None,
         related_roles: Sequence[discord.Role | None] | None = None,
         include_case_id: bool | None = None,
@@ -296,6 +309,7 @@ class AuditLogger:
             guild,
             event_key,
             related_channels=related_channels,
+            related_channel_ids=related_channel_ids,
             related_users=related_users,
             related_roles=related_roles,
         ):

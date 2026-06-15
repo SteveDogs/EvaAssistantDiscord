@@ -493,6 +493,7 @@ class AuditCog(commands.Cog):
             store=store,
             default_category_name=config.audit_category_name,
             default_category_id=config.audit_category_id,
+            static_ignored_channel_ids=config.ignored_channel_ids,
         )
 
     @staticmethod
@@ -837,6 +838,25 @@ class AuditCog(commands.Cog):
         category_id = getattr(channel, "category_id", None)
         return category_id is not None and int(category_id) == int(saved.get("category_id") or 0)
 
+    def get_ignored_channel_ids(self, guild_id: int) -> set[int]:
+        return self.store.get_ignored_ids(guild_id, "channel_ids") | set(self.config.ignored_channel_ids)
+
+    def is_ignored_channel_id(self, guild_id: int, channel_id: int | None) -> bool:
+        return channel_id is not None and int(channel_id) in self.get_ignored_channel_ids(guild_id)
+
+    def is_ignored_channel(self, guild: discord.Guild, channel: discord.abc.GuildChannel | discord.Thread | None) -> bool:
+        if channel is None:
+            return False
+        ignored_channel_ids = self.get_ignored_channel_ids(guild.id)
+        ignored_category_ids = self.store.get_ignored_ids(guild.id, "category_ids")
+        if int(channel.id) in ignored_channel_ids:
+            return True
+        parent_id = getattr(channel, "parent_id", None)
+        if parent_id is not None and int(parent_id) in ignored_channel_ids:
+            return True
+        category_id = getattr(channel, "category_id", None)
+        return category_id is not None and int(category_id) in ignored_category_ids
+
     def should_reply_with_banter(self, message: discord.Message) -> bool:
         if not self.config.chat_banter_enabled:
             return False
@@ -847,6 +867,8 @@ class AuditCog(commands.Cog):
         if message.type not in {discord.MessageType.default, discord.MessageType.reply}:
             return False
         if message.webhook_id is not None:
+            return False
+        if isinstance(message.channel, (discord.TextChannel, discord.Thread)) and self.is_ignored_channel(message.guild, message.channel):
             return False
         if isinstance(message.channel, (discord.TextChannel, discord.Thread)) and self.is_audit_channel(message.guild, message.channel):
             return False
@@ -921,9 +943,10 @@ class AuditCog(commands.Cog):
             f" variants={CHAT_BANTER.reply_variants_count}"
         )
         ignored = saved["ignored"]
+        ignored_channel_count = len(self.get_ignored_channel_ids(interaction.guild.id))
         lines.append(
             "Ignore:"
-            f" channels={len(ignored['channel_ids'])},"
+            f" channels={ignored_channel_count},"
             f" categories={len(ignored['category_ids'])},"
             f" users={len(ignored['user_ids'])},"
             f" roles={len(ignored['role_ids'])}"
@@ -1236,6 +1259,7 @@ class AuditCog(commands.Cog):
                 fields=fields,
                 show_target_field=False,
                 related_channels=[target if isinstance(target, discord.abc.GuildChannel) else None],
+                related_channel_ids=[getattr(target, "id", None)],
                 related_users=[entry.user],
             )
         elif action_value == 12:
@@ -1248,6 +1272,7 @@ class AuditCog(commands.Cog):
                 reason=entry.reason,
                 fields=fields,
                 show_target_field=False,
+                related_channels=[target if isinstance(target, discord.abc.GuildChannel) else None],
                 related_users=[entry.user],
             )
         elif action_value == 11:
@@ -1292,6 +1317,8 @@ class AuditCog(commands.Cog):
                 reason=entry.reason,
                 fields=fields,
                 show_target_field=False,
+                related_channels=[target if isinstance(target, discord.Thread) else None],
+                related_channel_ids=[getattr(target, "id", None)],
                 related_users=[entry.user],
             )
         elif action_value == 112:
@@ -1304,6 +1331,8 @@ class AuditCog(commands.Cog):
                 reason=entry.reason,
                 fields=fields,
                 show_target_field=False,
+                related_channels=[target if isinstance(target, discord.Thread) else None],
+                related_channel_ids=[getattr(target, "id", None)],
                 related_users=[entry.user],
             )
         elif action_value == 111:
@@ -1319,6 +1348,8 @@ class AuditCog(commands.Cog):
                 reason=entry.reason,
                 fields=fields,
                 show_target_field=False,
+                related_channels=[target if isinstance(target, discord.Thread) else None],
+                related_channel_ids=[getattr(target, "id", None)],
                 related_users=[entry.user],
             )
         elif action_value == 30:
@@ -2039,6 +2070,8 @@ class AuditCog(commands.Cog):
     async def on_message_delete(self, message: discord.Message) -> None:
         if message.guild is None or message.author.bot:
             return
+        if isinstance(message.channel, (discord.TextChannel, discord.Thread)) and self.is_ignored_channel(message.guild, message.channel):
+            return
         entry = await self.find_message_delete_entry(message)
         fields = [
             ("Канал", message.channel.mention, False),
@@ -2089,7 +2122,12 @@ class AuditCog(commands.Cog):
         guild = self.bot.get_guild(payload.guild_id)
         if guild is None:
             return
-        channel = guild.get_channel(payload.channel_id)
+        channel = guild.get_channel(payload.channel_id) or guild.get_thread(payload.channel_id)
+        if isinstance(channel, (discord.abc.GuildChannel, discord.Thread)):
+            if self.is_ignored_channel(guild, channel):
+                return
+        elif self.is_ignored_channel_id(guild.id, payload.channel_id):
+            return
         channel_value = channel.mention if isinstance(channel, discord.TextChannel) else f"`{payload.channel_id}`"
         entry = await self.find_raw_message_delete_entry(guild, payload.channel_id)
         fields: list[tuple[str, str, bool]] = [
@@ -2133,7 +2171,12 @@ class AuditCog(commands.Cog):
         guild = self.bot.get_guild(payload.guild_id)
         if guild is None:
             return
-        channel = guild.get_channel(payload.channel_id)
+        channel = guild.get_channel(payload.channel_id) or guild.get_thread(payload.channel_id)
+        if isinstance(channel, (discord.abc.GuildChannel, discord.Thread)):
+            if self.is_ignored_channel(guild, channel):
+                return
+        elif self.is_ignored_channel_id(guild.id, payload.channel_id):
+            return
         cached_messages = [message for message in payload.cached_messages if not message.author.bot]
         fields: list[tuple[str, str, bool]] = [
             ("Канал", channel.mention if isinstance(channel, discord.TextChannel) else f"`{payload.channel_id}`", False),
@@ -2167,6 +2210,8 @@ class AuditCog(commands.Cog):
     @commands.Cog.listener()
     async def on_message_edit(self, before: discord.Message, after: discord.Message) -> None:
         if before.guild is None or before.author.bot:
+            return
+        if isinstance(before.channel, (discord.TextChannel, discord.Thread)) and self.is_ignored_channel(before.guild, before.channel):
             return
         if before.content == after.content and before.attachments == after.attachments:
             return
@@ -2206,7 +2251,12 @@ class AuditCog(commands.Cog):
         guild = self.bot.get_guild(payload.guild_id)
         if guild is None:
             return
-        channel = guild.get_channel(payload.channel_id)
+        channel = guild.get_channel(payload.channel_id) or guild.get_thread(payload.channel_id)
+        if isinstance(channel, (discord.abc.GuildChannel, discord.Thread)):
+            if self.is_ignored_channel(guild, channel):
+                return
+        elif self.is_ignored_channel_id(guild.id, payload.channel_id):
+            return
         channel_value = channel.mention if isinstance(channel, discord.TextChannel) else f"`{payload.channel_id}`"
         await self.audit.send_event(
             guild,
