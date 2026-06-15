@@ -21,6 +21,7 @@ from roseblade_bot.audit_logger import AuditLogger
 from roseblade_bot.chat_banter import CHAT_BANTER
 from roseblade_bot.config import BotConfig, load_config
 from roseblade_bot.storage import JsonStateStore
+from roseblade_bot.voice_guard import VOICE_GUARD
 
 
 def _format_message_content(content: str | None) -> str:
@@ -489,6 +490,7 @@ class AuditCog(commands.Cog):
         self._chat_banter_last_channel_reply: dict[tuple[int, int], datetime] = {}
         self._chat_banter_last_user_reply: dict[tuple[int, int], datetime] = {}
         self._chat_banter_last_channel_text: dict[tuple[int, int], str] = {}
+        self._protected_voice_guard_recent: dict[tuple[int, int, int], datetime] = {}
         self.audit = AuditLogger(
             store=store,
             default_category_name=config.audit_category_name,
@@ -841,6 +843,16 @@ class AuditCog(commands.Cog):
     def get_ignored_channel_ids(self, guild_id: int) -> set[int]:
         return self.store.get_ignored_ids(guild_id, "channel_ids") | set(self.config.ignored_channel_ids)
 
+    def get_protected_voice_guard_user_ids(self, guild: discord.Guild) -> set[int]:
+        protected = set(self.config.protected_voice_guard_user_ids)
+        protected.add(guild.owner_id)
+        return protected
+
+    def is_protected_voice_guard_target(self, member: discord.Member) -> bool:
+        if not self.config.protected_voice_guard_enabled:
+            return False
+        return member.id in self.get_protected_voice_guard_user_ids(member.guild)
+
     def is_ignored_channel_id(self, guild_id: int, channel_id: int | None) -> bool:
         return channel_id is not None and int(channel_id) in self.get_ignored_channel_ids(guild_id)
 
@@ -896,6 +908,57 @@ class AuditCog(commands.Cog):
         self._chat_banter_last_user_reply[user_key] = now
         self._chat_banter_last_channel_text[channel_key] = reply_text
 
+    async def maybe_trigger_protected_voice_guard(
+        self,
+        *,
+        target: discord.Member,
+        actor: discord.abc.User | None,
+        source_channel: discord.VoiceChannel | discord.StageChannel | None,
+    ) -> None:
+        if actor is None or actor.bot:
+            return
+        if source_channel is None:
+            return
+        if not self.is_protected_voice_guard_target(target):
+            return
+
+        protected_ids = self.get_protected_voice_guard_user_ids(target.guild)
+        if actor.id in protected_ids or actor.id == target.id or self.bot.user is None or actor.id == self.bot.user.id:
+            return
+
+        key = (target.guild.id, target.id, actor.id)
+        stamp = self._protected_voice_guard_recent.get(key)
+        now = discord.utils.utcnow()
+        if stamp is not None and now - stamp <= timedelta(seconds=20):
+            return
+        self._protected_voice_guard_recent[key] = now
+
+        actor_member = await self.resolve_member(target.guild, actor)
+        actor_user: discord.abc.User = actor_member if actor_member is not None else actor
+        warning_text = VOICE_GUARD.render_warning(
+            target_name=_display_name(target),
+            is_owner_target=target.id == target.guild.owner_id,
+        )
+
+        try:
+            await actor_user.send(warning_text)
+        except (discord.Forbidden, discord.HTTPException, AttributeError):
+            pass
+
+        if actor_member is None or actor_member.voice.channel is None:
+            return
+
+        try:
+            await actor_member.move_to(
+                None,
+                reason=(
+                    "EVA protected voice guard: "
+                    f"{target.display_name} is protected against forced disconnects."
+                ),
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            return
+
     @app_commands.command(name="audit_setup", description="Создать категорию и каналы для аудита")
     @app_commands.describe(category_name="Название категории аудита")
     @app_commands.checks.has_permissions(administrator=True)
@@ -936,6 +999,13 @@ class AuditCog(commands.Cog):
             f" message_content={_bool_label(self.config.enable_message_content_intent)}"
         )
         lines.append(f"Префиксы ников: `{len(self.config.nickname_prefix_rules)}`")
+        protected_voice_guard_count = len(self.get_protected_voice_guard_user_ids(interaction.guild))
+        lines.append(
+            "Voice guard:"
+            f" enabled={_bool_label(self.config.protected_voice_guard_enabled)},"
+            f" protected={protected_voice_guard_count},"
+            f" phrases={VOICE_GUARD.variants_count}"
+        )
         lines.append(
             "Chat EVA:"
             f" enabled={_bool_label(self.config.chat_banter_enabled)},"
@@ -2441,6 +2511,11 @@ class AuditCog(commands.Cog):
                         thumbnail_target=member,
                         related_channels=[before.channel],
                         related_users=[member, entry.user],
+                    )
+                    await self.maybe_trigger_protected_voice_guard(
+                        target=member,
+                        actor=entry.user,
+                        source_channel=before.channel,
                     )
                     return
                 await self._log_voice_session_finished(

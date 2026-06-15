@@ -37,6 +37,8 @@ class BotConfig:
     enable_message_content_intent: bool
     nickname_prefix_rules: dict[int, str]
     ignored_channel_ids: frozenset[int]
+    protected_voice_guard_enabled: bool
+    protected_voice_guard_user_ids: frozenset[int]
     chat_banter_enabled: bool
     chat_banter_reply_chance: float
     chat_banter_channel_cooldown_seconds: int
@@ -121,6 +123,8 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
     enable_message_content_intent = _parse_bool_env("ENABLE_MESSAGE_CONTENT_INTENT", default=False)
     nickname_prefix_rules = _parse_nickname_prefix_rules("NICK_PREFIX_RULES")
     ignored_channel_ids = _parse_id_set_env("IGNORED_CHANNEL_IDS")
+    protected_voice_guard_enabled = _parse_bool_env("PROTECTED_VOICE_GUARD_ENABLED", default=False)
+    protected_voice_guard_user_ids = _parse_id_set_env("PROTECTED_VOICE_GUARD_USER_IDS")
     chat_banter_enabled = _parse_bool_env("CHAT_BANTER_ENABLED", default=True)
     chat_banter_reply_chance = max(0.0, min(1.0, _parse_float_env("CHAT_BANTER_REPLY_CHANCE", default=0.35)))
     chat_banter_channel_cooldown_seconds = max(0, _parse_int_env("CHAT_BANTER_CHANNEL_COOLDOWN_SECONDS", default=120))
@@ -136,6 +140,8 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
         enable_message_content_intent=enable_message_content_intent,
         nickname_prefix_rules=nickname_prefix_rules,
         ignored_channel_ids=ignored_channel_ids,
+        protected_voice_guard_enabled=protected_voice_guard_enabled,
+        protected_voice_guard_user_ids=protected_voice_guard_user_ids,
         chat_banter_enabled=chat_banter_enabled,
         chat_banter_reply_chance=chat_banter_reply_chance,
         chat_banter_channel_cooldown_seconds=chat_banter_channel_cooldown_seconds,
