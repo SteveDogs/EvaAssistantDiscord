@@ -622,6 +622,7 @@ class AuditCog(commands.Cog):
             f" enabled={_bool_label(self.config.pubg_lookup_enabled)},"
             f" configured={_bool_label(self.pubg_lookup.is_configured)},"
             f" channels={self.pubg_lookup.channel_count()},"
+            f" roles={self.pubg_lookup.allowed_role_count()},"
             f" platform={self.config.pubg_platform},"
             f" lifetime={_bool_label(self.config.pubg_lookup_include_lifetime_stats)},"
             f" steam_key={_bool_label(self.pubg_lookup.has_steam_key())}"

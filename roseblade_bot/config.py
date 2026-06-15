@@ -45,6 +45,7 @@ class BotConfig:
     chat_banter_user_cooldown_seconds: int
     pubg_lookup_enabled: bool
     pubg_lookup_channel_ids: frozenset[int]
+    pubg_lookup_allowed_role_ids: frozenset[int]
     pubg_api_key: str
     steam_api_key: str
     pubg_platform: str
@@ -139,6 +140,7 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
     chat_banter_user_cooldown_seconds = max(0, _parse_int_env("CHAT_BANTER_USER_COOLDOWN_SECONDS", default=300))
     pubg_lookup_enabled = _parse_bool_env("PUBG_LOOKUP_ENABLED", default=False)
     pubg_lookup_channel_ids = _parse_id_set_env("PUBG_LOOKUP_CHANNEL_IDS")
+    pubg_lookup_allowed_role_ids = _parse_id_set_env("PUBG_LOOKUP_ALLOWED_ROLE_IDS")
     pubg_api_key = os.getenv("PUBG_API_KEY", "").strip()
     steam_api_key = os.getenv("STEAM_API_KEY", "").strip()
     pubg_platform = (os.getenv("PUBG_PLATFORM", "steam").strip().lower() or "steam")
@@ -164,6 +166,7 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
         chat_banter_user_cooldown_seconds=chat_banter_user_cooldown_seconds,
         pubg_lookup_enabled=pubg_lookup_enabled,
         pubg_lookup_channel_ids=pubg_lookup_channel_ids,
+        pubg_lookup_allowed_role_ids=pubg_lookup_allowed_role_ids,
         pubg_api_key=pubg_api_key,
         steam_api_key=steam_api_key,
         pubg_platform=pubg_platform,
