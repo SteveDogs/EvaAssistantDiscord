@@ -136,6 +136,14 @@ CHAT_BANTER_ENABLED=true
 CHAT_BANTER_REPLY_CHANCE=0.35
 CHAT_BANTER_CHANNEL_COOLDOWN_SECONDS=120
 CHAT_BANTER_USER_COOLDOWN_SECONDS=300
+PUBG_LOOKUP_ENABLED=false
+PUBG_LOOKUP_CHANNEL_IDS=1354908421811601520
+PUBG_PLATFORM=steam
+PUBG_LOOKUP_INCLUDE_LIFETIME_STATS=false
+PUBG_LOOKUP_CACHE_TTL_SECONDS=900
+PUBG_LOOKUP_USER_COOLDOWN_SECONDS=20
+PUBG_API_KEY=
+STEAM_API_KEY=
 ```
 
 Если нужно складывать лог-каналы в уже существующую категорию Discord:
@@ -229,6 +237,58 @@ IGNORED_CHANNEL_IDS=1409209895382814821;1409209895382814822
 
 Кроме `.env`, исключения по-прежнему можно накидывать и через slash-команды `/audit_ignore_channel` и `/audit_unignore_channel`.
 
+## PUBG Проверка По Нику
+
+EVA умеет в отдельном чате отвечать на обращения вроде:
+
+- `Ева посмотри бан ник SteveDogs`
+- `Ева глянь пожалуйста аккаунт S_T_E_V_E-`
+- `Ева проверь pubg игрок G_O_S_P_O_Z_H_A`
+
+Как это устроено в текущей версии:
+
+- EVA реагирует только в каналах из `PUBG_LOOKUP_CHANNEL_IDS`
+- сообщение должно начинаться с обращения к Еве и содержать просьбу посмотреть ник PUBG
+- основной запрос идёт через официальный PUBG API по `playerName`
+- по нику EVA может показать статус аккаунта, тип бана, shard, clanId и число недавних матчей
+- при включённом `PUBG_LOOKUP_INCLUDE_LIFETIME_STATS` EVA дополнительно тянет lifetime-статы и показывает лучший режим
+
+Почему не делаем ставку на Steam API в этой же команде:
+
+- официальный FAQ PUBG прямо говорит, что PUBG API не умеет получать SteamID из IGN или наоборот
+- поэтому для обычной проверки по нику Steam-ключ не помогает
+- `STEAM_API_KEY` оставлен в конфиге на будущее, если позже захочется отдельный режим проверки по `steamid` или `steamcommunity.com/id/...`
+
+Настройка:
+
+```env
+PUBG_LOOKUP_ENABLED=true
+PUBG_LOOKUP_CHANNEL_IDS=1354908421811601520
+PUBG_PLATFORM=steam
+PUBG_LOOKUP_INCLUDE_LIFETIME_STATS=false
+PUBG_LOOKUP_CACHE_TTL_SECONDS=900
+PUBG_LOOKUP_USER_COOLDOWN_SECONDS=20
+PUBG_API_KEY=your_pubg_api_key
+STEAM_API_KEY=your_steam_api_key
+```
+
+Что важно по лимитам:
+
+- PUBG Developer API по умолчанию даёт `10` запросов в минуту
+- простой поиск по нику стоит `1` rate-limited запрос
+- поиск по нику плюс lifetime-статы стоит уже `2` rate-limited запроса
+- EVA поэтому использует кэш и user cooldown, чтобы чат не сжигал лимит впустую
+
+Что EVA реально может достать из PUBG API:
+
+- факт существования аккаунта на нужном shard
+- `banType` из player object
+- внутренний PUBG account ID
+- `clanId`, если он есть
+- количество недавних матчей, которые API помнит за последние `14` дней
+- lifetime / season / ranked-статы, если пойдём в дополнительные запросы
+- mastery, leaderboards, match data и telemetry для более глубоких сценариев
+
 ## Защита Владельца И Избранных
 
 EVA умеет отдельно охранять владельца сервера и выбранные ID от модераторского `disconnect` из голосового канала.
@@ -312,13 +372,19 @@ roseblade_bot/
   __init__.py
   audit_definitions.py
   audit_logger.py
+  audit_snapshots.py
   bot.py
+  chat_banter.py
   config.py
+  formatters.py
   locales/
     ru.toml
+  message_handlers.py
   phrases.py
+  pubg_lookup.py
   storage.py
   voice_guard.py
+  voice_handlers.py
 .env.example
 requirements.txt
 ```

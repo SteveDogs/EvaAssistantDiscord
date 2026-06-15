@@ -43,6 +43,14 @@ class BotConfig:
     chat_banter_reply_chance: float
     chat_banter_channel_cooldown_seconds: int
     chat_banter_user_cooldown_seconds: int
+    pubg_lookup_enabled: bool
+    pubg_lookup_channel_ids: frozenset[int]
+    pubg_api_key: str
+    steam_api_key: str
+    pubg_platform: str
+    pubg_lookup_include_lifetime_stats: bool
+    pubg_lookup_cache_ttl_seconds: int
+    pubg_lookup_user_cooldown_seconds: int
 
 
 def _parse_bool_env(name: str, default: bool = False) -> bool:
@@ -129,6 +137,14 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
     chat_banter_reply_chance = max(0.0, min(1.0, _parse_float_env("CHAT_BANTER_REPLY_CHANCE", default=0.35)))
     chat_banter_channel_cooldown_seconds = max(0, _parse_int_env("CHAT_BANTER_CHANNEL_COOLDOWN_SECONDS", default=120))
     chat_banter_user_cooldown_seconds = max(0, _parse_int_env("CHAT_BANTER_USER_COOLDOWN_SECONDS", default=300))
+    pubg_lookup_enabled = _parse_bool_env("PUBG_LOOKUP_ENABLED", default=False)
+    pubg_lookup_channel_ids = _parse_id_set_env("PUBG_LOOKUP_CHANNEL_IDS")
+    pubg_api_key = os.getenv("PUBG_API_KEY", "").strip()
+    steam_api_key = os.getenv("STEAM_API_KEY", "").strip()
+    pubg_platform = (os.getenv("PUBG_PLATFORM", "steam").strip().lower() or "steam")
+    pubg_lookup_include_lifetime_stats = _parse_bool_env("PUBG_LOOKUP_INCLUDE_LIFETIME_STATS", default=False)
+    pubg_lookup_cache_ttl_seconds = max(60, _parse_int_env("PUBG_LOOKUP_CACHE_TTL_SECONDS", default=900))
+    pubg_lookup_user_cooldown_seconds = max(0, _parse_int_env("PUBG_LOOKUP_USER_COOLDOWN_SECONDS", default=20))
 
     return BotConfig(
         token=token,
@@ -146,4 +162,12 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
         chat_banter_reply_chance=chat_banter_reply_chance,
         chat_banter_channel_cooldown_seconds=chat_banter_channel_cooldown_seconds,
         chat_banter_user_cooldown_seconds=chat_banter_user_cooldown_seconds,
+        pubg_lookup_enabled=pubg_lookup_enabled,
+        pubg_lookup_channel_ids=pubg_lookup_channel_ids,
+        pubg_api_key=pubg_api_key,
+        steam_api_key=steam_api_key,
+        pubg_platform=pubg_platform,
+        pubg_lookup_include_lifetime_stats=pubg_lookup_include_lifetime_stats,
+        pubg_lookup_cache_ttl_seconds=pubg_lookup_cache_ttl_seconds,
+        pubg_lookup_user_cooldown_seconds=pubg_lookup_user_cooldown_seconds,
     )
