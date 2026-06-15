@@ -17,6 +17,7 @@
 - логирует удаление и редактирование сообщений
 - умеет автоматически ставить префиксы в ники по ролям
 - умеет иногда кокетливо троллить мат в чате вместо тупого наказания
+- умеет публиковать вечерний Steam-дайджест по расписанию
 - поддерживает фирменный стиль и более живую подачу в embed-логах
 
 ## Зачем EVA
@@ -60,6 +61,21 @@ EVA умеет автоматически создать и поддержива
 - `саунд-панель`
 - `автомод`
 - `вебхуки`
+
+### Вечерний Steam-дайджест
+
+EVA умеет раз в день публиковать небольшой Steam-дайджест в указанный канал.
+
+Что входит в пост:
+
+- статус Steam Web API и время ответа
+- маленькая сводка по Steam Support
+- отдельная заметка по PUBG
+- топ игр Steam по текущему онлайну
+
+Для теста без ожидания вечера есть slash-команда:
+
+- `/steam_digest_now`
 
 ### Какие события логируются
 
@@ -144,6 +160,13 @@ PUBG_LOOKUP_INCLUDE_RANKED=true
 PUBG_LOOKUP_INCLUDE_LIFETIME_STATS=false
 PUBG_LOOKUP_CACHE_TTL_SECONDS=900
 PUBG_LOOKUP_USER_COOLDOWN_SECONDS=20
+STEAM_DIGEST_ENABLED=true
+STEAM_DIGEST_CHANNEL_IDS=1354908421811601520
+STEAM_DIGEST_HOUR=20
+STEAM_DIGEST_MINUTE=0
+STEAM_DIGEST_TIMEZONE=Europe/Simferopol
+STEAM_DIGEST_TOP_COUNT=15
+STEAM_DIGEST_INCLUDE_SUPPORT_STATS=true
 PUBG_API_KEY=
 STEAM_API_KEY=
 ```
@@ -198,6 +221,31 @@ ENABLE_MESSAGE_CONTENT_INTENT=true
 Для самых полезных логов удаления сообщений и pin/unpin желательно отдельно включать именно `Message Content Intent`, иначе Discord не всегда отдаёт текст сообщения боту.
 Для автопрефиксов в никах по ролям желательно включить именно `Server Members Intent`, иначе Discord не сможет надёжно отслеживать каждую смену ника и ролей.
 Для игривых ответов EVA на мат в чате `Message Content Intent` обязателен, иначе бот просто не увидит текст сообщений.
+
+## Steam-дайджест
+
+Если хочется, чтобы EVA вечером приносила небольшую сводку по Steam в отдельный канал, включи блок:
+
+```env
+STEAM_DIGEST_ENABLED=true
+STEAM_DIGEST_CHANNEL_IDS=1354908421811601520
+STEAM_DIGEST_HOUR=20
+STEAM_DIGEST_MINUTE=0
+STEAM_DIGEST_TIMEZONE=Europe/Simferopol
+STEAM_DIGEST_TOP_COUNT=15
+STEAM_DIGEST_INCLUDE_SUPPORT_STATS=true
+```
+
+Пояснение:
+
+- `STEAM_DIGEST_CHANNEL_IDS` — один или несколько каналов через `;` или `,`
+- `STEAM_DIGEST_HOUR` и `STEAM_DIGEST_MINUTE` — время публикации
+- `STEAM_DIGEST_TIMEZONE` — таймзона расписания
+- `STEAM_DIGEST_TOP_COUNT` — сколько игр показывать в списке
+- `STEAM_DIGEST_INCLUDE_SUPPORT_STATS` — добавлять ли блок со Steam Support
+
+Даже если бот перезапустится позже `20:00`, EVA догонит пропущенный пост в этот же день и не задублирует его повторно после рестарта.
+Для ручной проверки без ожидания расписания используй `/steam_digest_now`.
 
 ## Игривые ответы EVA в чате
 
