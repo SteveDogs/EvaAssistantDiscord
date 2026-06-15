@@ -50,6 +50,7 @@ from roseblade_bot.message_handlers import (
     handle_on_raw_message_delete,
     handle_on_raw_message_edit,
 )
+from roseblade_bot.pubg_lookup import PubgLookupService
 from roseblade_bot.storage import JsonStateStore
 from roseblade_bot.voice_guard import VOICE_GUARD
 from roseblade_bot.voice_handlers import handle_on_voice_state_update
@@ -69,6 +70,7 @@ class AuditCog(commands.Cog):
         self._chat_banter_last_user_reply: dict[tuple[int, int], datetime] = {}
         self._chat_banter_last_channel_text: dict[tuple[int, int], str] = {}
         self._protected_voice_guard_recent: dict[tuple[int, int, int, int | None], datetime] = {}
+        self.pubg_lookup = PubgLookupService(config)
         self.audit = AuditLogger(
             store=store,
             default_category_name=config.audit_category_name,
@@ -614,6 +616,15 @@ class AuditCog(commands.Cog):
             f" enabled={_bool_label(self.config.chat_banter_enabled)},"
             f" chance={self.config.chat_banter_reply_chance:.2f},"
             f" variants={CHAT_BANTER.reply_variants_count}"
+        )
+        lines.append(
+            "PUBG lookup:"
+            f" enabled={_bool_label(self.config.pubg_lookup_enabled)},"
+            f" configured={_bool_label(self.pubg_lookup.is_configured)},"
+            f" channels={self.pubg_lookup.channel_count()},"
+            f" platform={self.config.pubg_platform},"
+            f" lifetime={_bool_label(self.config.pubg_lookup_include_lifetime_stats)},"
+            f" steam_key={_bool_label(self.pubg_lookup.has_steam_key())}"
         )
         ignored = saved["ignored"]
         ignored_channel_count = len(self.get_ignored_channel_ids(interaction.guild.id))

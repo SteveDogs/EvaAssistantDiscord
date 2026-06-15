@@ -38,6 +38,9 @@ def _related_channels(
 
 
 async def handle_on_message(cog: AuditCog, message: discord.Message) -> None:
+    if await cog.pubg_lookup.maybe_handle_message(cog, message):
+        return
+
     if not cog.should_reply_with_banter(message):
         return
 
