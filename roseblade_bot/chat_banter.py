@@ -48,15 +48,16 @@ def _compile_roots(roots: tuple[str, ...]) -> tuple[re.Pattern[str], ...]:
 @dataclass(frozen=True, slots=True)
 class ChatBanterPack:
     trigger_roots: tuple[str, ...]
+    direct_replies: tuple[str, ...]
     openers: tuple[str, ...]
-    teases: tuple[str, ...]
     redirects: tuple[str, ...]
-    closers: tuple[str, ...]
+    afterthoughts: tuple[str, ...]
     patterns: tuple[re.Pattern[str], ...]
 
     @property
     def reply_variants_count(self) -> int:
-        return len(self.openers) * len(self.teases) * len(self.redirects) * len(self.closers)
+        combo_count = len(self.openers) * len(self.redirects) * (len(self.afterthoughts) + 1)
+        return len(self.direct_replies) + combo_count
 
     def contains_trigger(self, text: str) -> bool:
         normalized = normalize_text(text)
@@ -64,35 +65,67 @@ class ChatBanterPack:
             return False
         return any(pattern.search(normalized) for pattern in self.patterns)
 
-    def render_reply(self, name: str) -> str:
+    def _render_direct_reply(self, name: str) -> str:
+        if not self.direct_replies:
+            return ""
+        return random.choice(self.direct_replies).format(name=name).strip()
+
+    def _render_combo_reply(self, name: str) -> str:
+        if not self.openers or not self.redirects:
+            return ""
         parts = (
             random.choice(self.openers).format(name=name),
-            random.choice(self.teases).format(name=name),
             random.choice(self.redirects).format(name=name),
-            random.choice(self.closers).format(name=name),
         )
-        return " ".join(part.strip() for part in parts if part.strip())
+        rendered = [part.strip() for part in parts if part.strip()]
+        if self.afterthoughts and random.random() < 0.35:
+            rendered.append(random.choice(self.afterthoughts).format(name=name).strip())
+        return " ".join(part for part in rendered if part)
+
+    def render_reply(self, name: str, previous_reply: str | None = None) -> str:
+        for _ in range(8):
+            use_direct_reply = bool(self.direct_replies) and (
+                not self.openers or not self.redirects or random.random() < 0.72
+            )
+            reply = self._render_direct_reply(name) if use_direct_reply else self._render_combo_reply(name)
+            if reply and reply != previous_reply:
+                return reply
+
+        fallback = self._render_direct_reply(name) or self._render_combo_reply(name)
+        if fallback and fallback != previous_reply:
+            return fallback
+
+        if self.direct_replies:
+            for template in self.direct_replies:
+                candidate = template.format(name=name).strip()
+                if candidate and candidate != previous_reply:
+                    return candidate
+
+        return fallback
 
 
 _FALLBACK_PACK = ChatBanterPack(
-    trigger_roots=("бля", "хуй", "fuck", "shit"),
-    openers=(
-        "{name}, полегче с фейерверком слов.",
-        "{name}, у тебя лексика сегодня с дымком.",
+    trigger_roots=("бля", "хуй", "fuck", "shit", "пизд"),
+    direct_replies=(
+        "{name}, ну без этого. скажи нормально.",
+        "{name}, дядя, полегче. мысль есть, мат убери.",
+        "{name}, алло, эмоция долетела. теперь без словесного пожара.",
+        "{name}, сильный заход, но давай по-человечески.",
     ),
-    teases=(
-        "Ева услышала это даже сквозь музыку сервера.",
-        "Чат слегка покраснел и сделал вид, что привык.",
+    openers=(
+        "{name}, ну ты чего.",
+        "{name}, спокойно.",
+        "{name}, алло.",
     ),
     redirects=(
-        "Давай без ковровой бомбардировки словарём мата.",
-        "Переходи на нормальный режим речи, ты же умеешь красиво.",
+        "Скажи то же самое, только без мата.",
+        "Перефразируй красиво, я в тебя верю.",
     ),
-    closers=(
-        "Я не ругаюсь, я просто элегантно напоминаю.",
-        "Сделай вдох и выдай следующую реплику уже с шармом.",
+    afterthoughts=(
+        "Я же тут за красивый вайб.",
+        "Чат тебе спасибо скажет.",
     ),
-    patterns=_compile_roots(("бля", "хуй", "fuck", "shit")),
+    patterns=_compile_roots(("бля", "хуй", "fuck", "shit", "пизд")),
 )
 
 
@@ -107,20 +140,22 @@ def load_chat_banter(locale: str = "chat_banter") -> ChatBanterPack:
         return _FALLBACK_PACK
 
     trigger_roots = _as_text_tuple(payload.get("trigger_roots"))
+    direct_replies = _as_text_tuple(payload.get("direct_replies"))
     openers = _as_text_tuple(payload.get("openers"))
-    teases = _as_text_tuple(payload.get("teases"))
     redirects = _as_text_tuple(payload.get("redirects"))
-    closers = _as_text_tuple(payload.get("closers"))
+    afterthoughts = _as_text_tuple(payload.get("afterthoughts"))
 
-    if not (trigger_roots and openers and teases and redirects and closers):
+    if not trigger_roots:
+        return _FALLBACK_PACK
+    if not direct_replies and not (openers and redirects):
         return _FALLBACK_PACK
 
     return ChatBanterPack(
         trigger_roots=trigger_roots,
+        direct_replies=direct_replies,
         openers=openers,
-        teases=teases,
         redirects=redirects,
-        closers=closers,
+        afterthoughts=afterthoughts,
         patterns=_compile_roots(trigger_roots),
     )
 

@@ -488,6 +488,7 @@ class AuditCog(commands.Cog):
         self._managed_nickname_updates: dict[tuple[int, int], datetime] = {}
         self._chat_banter_last_channel_reply: dict[tuple[int, int], datetime] = {}
         self._chat_banter_last_user_reply: dict[tuple[int, int], datetime] = {}
+        self._chat_banter_last_channel_text: dict[tuple[int, int], str] = {}
         self.audit = AuditLogger(
             store=store,
             default_category_name=config.audit_category_name,
@@ -865,10 +866,13 @@ class AuditCog(commands.Cog):
             return False
         return True
 
-    def remember_banter_reply(self, message: discord.Message) -> None:
+    def remember_banter_reply(self, message: discord.Message, reply_text: str) -> None:
         now = discord.utils.utcnow()
-        self._chat_banter_last_channel_reply[(message.guild.id, message.channel.id)] = now  # type: ignore[arg-type]
-        self._chat_banter_last_user_reply[(message.guild.id, message.author.id)] = now  # type: ignore[arg-type]
+        channel_key = (message.guild.id, message.channel.id)  # type: ignore[arg-type]
+        user_key = (message.guild.id, message.author.id)  # type: ignore[arg-type]
+        self._chat_banter_last_channel_reply[channel_key] = now
+        self._chat_banter_last_user_reply[user_key] = now
+        self._chat_banter_last_channel_text[channel_key] = reply_text
 
     @app_commands.command(name="audit_setup", description="Создать категорию и каналы для аудита")
     @app_commands.describe(category_name="Название категории аудита")
@@ -2019,7 +2023,8 @@ class AuditCog(commands.Cog):
         if not self.should_reply_with_banter(message):
             return
 
-        reply_text = CHAT_BANTER.render_reply(_display_name(message.author))
+        previous_reply = self._chat_banter_last_channel_text.get((message.guild.id, message.channel.id))  # type: ignore[arg-type]
+        reply_text = CHAT_BANTER.render_reply(_display_name(message.author), previous_reply=previous_reply)
         try:
             await message.reply(
                 reply_text,
@@ -2028,7 +2033,7 @@ class AuditCog(commands.Cog):
             )
         except (discord.Forbidden, discord.HTTPException):
             return
-        self.remember_banter_reply(message)
+        self.remember_banter_reply(message, reply_text)
 
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message) -> None:
