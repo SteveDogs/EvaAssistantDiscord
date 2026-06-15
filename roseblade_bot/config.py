@@ -49,6 +49,7 @@ class BotConfig:
     pubg_api_key: str
     steam_api_key: str
     pubg_platform: str
+    pubg_lookup_include_ranked: bool
     pubg_lookup_include_lifetime_stats: bool
     pubg_lookup_cache_ttl_seconds: int
     pubg_lookup_user_cooldown_seconds: int
@@ -144,6 +145,7 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
     pubg_api_key = os.getenv("PUBG_API_KEY", "").strip()
     steam_api_key = os.getenv("STEAM_API_KEY", "").strip()
     pubg_platform = (os.getenv("PUBG_PLATFORM", "steam").strip().lower() or "steam")
+    pubg_lookup_include_ranked = _parse_bool_env("PUBG_LOOKUP_INCLUDE_RANKED", default=True)
     pubg_lookup_include_lifetime_stats = _parse_bool_env("PUBG_LOOKUP_INCLUDE_LIFETIME_STATS", default=False)
     pubg_lookup_cache_ttl_seconds = max(60, _parse_int_env("PUBG_LOOKUP_CACHE_TTL_SECONDS", default=900))
     pubg_lookup_user_cooldown_seconds = max(0, _parse_int_env("PUBG_LOOKUP_USER_COOLDOWN_SECONDS", default=20))
@@ -170,6 +172,7 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
         pubg_api_key=pubg_api_key,
         steam_api_key=steam_api_key,
         pubg_platform=pubg_platform,
+        pubg_lookup_include_ranked=pubg_lookup_include_ranked,
         pubg_lookup_include_lifetime_stats=pubg_lookup_include_lifetime_stats,
         pubg_lookup_cache_ttl_seconds=pubg_lookup_cache_ttl_seconds,
         pubg_lookup_user_cooldown_seconds=pubg_lookup_user_cooldown_seconds,

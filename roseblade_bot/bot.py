@@ -624,6 +624,7 @@ class AuditCog(commands.Cog):
             f" channels={self.pubg_lookup.channel_count()},"
             f" roles={self.pubg_lookup.allowed_role_count()},"
             f" platform={self.config.pubg_platform},"
+            f" ranked={_bool_label(self.config.pubg_lookup_include_ranked)},"
             f" lifetime={_bool_label(self.config.pubg_lookup_include_lifetime_stats)},"
             f" steam_key={_bool_label(self.pubg_lookup.has_steam_key())}"
         )

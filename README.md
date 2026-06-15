@@ -140,6 +140,7 @@ PUBG_LOOKUP_ENABLED=false
 PUBG_LOOKUP_CHANNEL_IDS=1354908421811601520
 PUBG_LOOKUP_ALLOWED_ROLE_IDS=1389394678561902652;1354908419567521986
 PUBG_PLATFORM=steam
+PUBG_LOOKUP_INCLUDE_RANKED=true
 PUBG_LOOKUP_INCLUDE_LIFETIME_STATS=false
 PUBG_LOOKUP_CACHE_TTL_SECONDS=900
 PUBG_LOOKUP_USER_COOLDOWN_SECONDS=20
@@ -253,6 +254,7 @@ EVA умеет в отдельном чате отвечать на обраще
 - сообщение должно начинаться с обращения к Еве и содержать просьбу посмотреть ник PUBG
 - основной запрос идёт через официальный PUBG API по `playerName`
 - по нику EVA может показать статус аккаунта, тип бана, shard, clanId и число недавних матчей
+- при включённом `PUBG_LOOKUP_INCLUDE_RANKED` EVA дополнительно тянет текущий ranked tier, RP и краткую ranked-сводку
 - при включённом `PUBG_LOOKUP_INCLUDE_LIFETIME_STATS` EVA дополнительно тянет lifetime-статы и показывает лучший режим
 
 Почему не делаем ставку на Steam API в этой же команде:
@@ -268,6 +270,7 @@ PUBG_LOOKUP_ENABLED=true
 PUBG_LOOKUP_CHANNEL_IDS=1354908421811601520
 PUBG_LOOKUP_ALLOWED_ROLE_IDS=1389394678561902652;1354908419567521986
 PUBG_PLATFORM=steam
+PUBG_LOOKUP_INCLUDE_RANKED=true
 PUBG_LOOKUP_INCLUDE_LIFETIME_STATS=false
 PUBG_LOOKUP_CACHE_TTL_SECONDS=900
 PUBG_LOOKUP_USER_COOLDOWN_SECONDS=20
@@ -279,7 +282,9 @@ STEAM_API_KEY=your_steam_api_key
 
 - PUBG Developer API по умолчанию даёт `10` запросов в минуту
 - простой поиск по нику стоит `1` rate-limited запрос
+- поиск по нику плюс ranked-стата обычно стоит `2` запроса, потому что EVA добирает текущий сезон и ranked summary
 - поиск по нику плюс lifetime-статы стоит уже `2` rate-limited запроса
+- если включены и ranked, и lifetime, lookup может стоить уже `3` запроса
 - EVA поэтому использует кэш и user cooldown, чтобы чат не сжигал лимит впустую
 
 По доступу:
