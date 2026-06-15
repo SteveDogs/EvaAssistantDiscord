@@ -2055,7 +2055,11 @@ class AuditCog(commands.Cog):
             return
 
         previous_reply = self._chat_banter_last_channel_text.get((message.guild.id, message.channel.id))  # type: ignore[arg-type]
-        reply_text = CHAT_BANTER.render_reply(_display_name(message.author), previous_reply=previous_reply)
+        reply_text = CHAT_BANTER.render_reply(
+            _display_name(message.author),
+            message.content,
+            previous_reply=previous_reply,
+        )
         try:
             await message.reply(
                 reply_text,
