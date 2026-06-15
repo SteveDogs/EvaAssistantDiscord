@@ -36,6 +36,7 @@ class BotConfig:
     enable_members_intent: bool
     enable_message_content_intent: bool
     nickname_prefix_rules: dict[int, str]
+    ignored_channel_ids: frozenset[int]
     chat_banter_enabled: bool
     chat_banter_reply_chance: float
     chat_banter_channel_cooldown_seconds: int
@@ -61,6 +62,20 @@ def _parse_int_env(name: str, default: int) -> int:
     if raw_value is None or not raw_value.strip():
         return default
     return int(raw_value.strip())
+
+
+def _parse_id_set_env(name: str) -> frozenset[int]:
+    raw_value = os.getenv(name, "").strip()
+    if not raw_value:
+        return frozenset()
+
+    values: set[int] = set()
+    for chunk in re.split(r"[;,\s]+", raw_value):
+        entry = chunk.strip()
+        if not entry:
+            continue
+        values.add(int(entry))
+    return frozenset(values)
 
 
 def _parse_nickname_prefix_rules(name: str) -> dict[int, str]:
@@ -105,6 +120,7 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
     enable_members_intent = _parse_bool_env("ENABLE_MEMBERS_INTENT", default=False)
     enable_message_content_intent = _parse_bool_env("ENABLE_MESSAGE_CONTENT_INTENT", default=False)
     nickname_prefix_rules = _parse_nickname_prefix_rules("NICK_PREFIX_RULES")
+    ignored_channel_ids = _parse_id_set_env("IGNORED_CHANNEL_IDS")
     chat_banter_enabled = _parse_bool_env("CHAT_BANTER_ENABLED", default=True)
     chat_banter_reply_chance = max(0.0, min(1.0, _parse_float_env("CHAT_BANTER_REPLY_CHANCE", default=0.35)))
     chat_banter_channel_cooldown_seconds = max(0, _parse_int_env("CHAT_BANTER_CHANNEL_COOLDOWN_SECONDS", default=120))
@@ -119,6 +135,7 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
         enable_members_intent=enable_members_intent,
         enable_message_content_intent=enable_message_content_intent,
         nickname_prefix_rules=nickname_prefix_rules,
+        ignored_channel_ids=ignored_channel_ids,
         chat_banter_enabled=chat_banter_enabled,
         chat_banter_reply_chance=chat_banter_reply_chance,
         chat_banter_channel_cooldown_seconds=chat_banter_channel_cooldown_seconds,
