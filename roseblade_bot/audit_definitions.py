@@ -121,6 +121,13 @@ CHANNEL_DEFINITIONS: dict[str, ChannelDefinition] = {
 EVENT_DEFINITIONS: dict[str, EventDefinition] = {
     "member_banned": EventDefinition("member_banned", "Участник забанен", "moderation", 0xE74C3C, "🔨"),
     "member_unbanned": EventDefinition("member_unbanned", "Участник разбанен", "moderation", 0x2ECC71, "🔓"),
+    "protected_ban_restored": EventDefinition(
+        "protected_ban_restored",
+        "Ева вернула бан обратно",
+        "moderation",
+        0xC0392B,
+        "🛡️",
+    ),
     "member_kicked": EventDefinition("member_kicked", "Участника выгнали", "moderation", 0xE67E22, "👢"),
     "member_timeout_applied": EventDefinition(
         "member_timeout_applied",

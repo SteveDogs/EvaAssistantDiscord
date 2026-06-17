@@ -5,6 +5,7 @@ Copyright (c) 2026 Steve Dogs Studio.
 
 from __future__ import annotations
 
+import asyncio
 from collections import deque
 from datetime import date, datetime, timedelta
 import random
@@ -75,6 +76,7 @@ class AuditCog(commands.Cog):
         self._chat_banter_last_user_reply: dict[tuple[int, int], datetime] = {}
         self._chat_banter_last_channel_text: dict[tuple[int, int], str] = {}
         self._protected_voice_guard_recent: dict[tuple[int, int, int, int | None], datetime] = {}
+        self._protected_ban_startup_check_done = False
         self.pubg_lookup = PubgLookupService(config)
         self.steam_digest = SteamDigestService(config)
         self.audit = AuditLogger(
@@ -356,6 +358,8 @@ class AuditCog(commands.Cog):
             self.nickname_sync_worker.start()
         if self.config.enable_members_intent and self.config.nickname_prefix_rules and not self.nickname_resync_scheduler.is_running():
             self.nickname_resync_scheduler.start()
+        if self.config.protected_bans_enabled and not self.protected_ban_enforcer.is_running():
+            self.protected_ban_enforcer.start()
 
     def cog_unload(self) -> None:
         if self.steam_digest_scheduler.is_running():
@@ -364,6 +368,8 @@ class AuditCog(commands.Cog):
             self.nickname_sync_worker.cancel()
         if self.nickname_resync_scheduler.is_running():
             self.nickname_resync_scheduler.cancel()
+        if self.protected_ban_enforcer.is_running():
+            self.protected_ban_enforcer.cancel()
 
     async def on_app_command_error(
         self,
@@ -388,10 +394,12 @@ class AuditCog(commands.Cog):
             guild = self.bot.get_guild(self.config.guild_id)
             if guild is not None:
                 await self.bootstrap_guild(guild)
+            await self.run_startup_protected_ban_check()
             return
 
         for guild in self.bot.guilds:
             await self.bootstrap_guild(guild)
+        await self.run_startup_protected_ban_check()
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild) -> None:
@@ -478,6 +486,72 @@ class AuditCog(commands.Cog):
             state["last_resync_scan_at"] = now.isoformat()
             state["last_resync_scan_queued"] = queued
             self.store.set_service_state(guild.id, "nickname_prefix", state)
+
+    async def enforce_protected_bans(self, *, force: bool, source: str) -> dict[int, int]:
+        if not self.config.protected_bans_enabled:
+            return {}
+        if not force and self.config.protected_bans_enforce_minutes <= 0:
+            return {}
+
+        restored_by_guild: dict[int, int] = {}
+        now = discord.utils.utcnow()
+        for guild in self.bot.guilds:
+            state = self._protected_bans_state(guild.id)
+            if not force:
+                last_run_raw = state.get("last_enforce_at")
+                last_run: datetime | None = None
+                if isinstance(last_run_raw, str):
+                    try:
+                        last_run = datetime.fromisoformat(last_run_raw)
+                    except ValueError:
+                        last_run = None
+                if last_run is not None and now - last_run < timedelta(minutes=self.config.protected_bans_enforce_minutes):
+                    continue
+
+            restored = 0
+            entries = list(self._protected_ban_entries(guild.id).values())
+            for entry in entries:
+                user_id = int(entry.get("user_id", 0) or 0)
+                if user_id <= 0:
+                    continue
+                try:
+                    await guild.fetch_ban(discord.Object(id=user_id))
+                    continue
+                except discord.NotFound:
+                    pass
+                except (discord.Forbidden, discord.HTTPException):
+                    continue
+
+                try:
+                    await guild.ban(
+                        discord.Object(id=user_id),
+                        reason="EVA protected perma-ban: периодическая проверка вернула бан обратно",
+                    )
+                    restored += 1
+                except (discord.Forbidden, discord.HTTPException):
+                    continue
+
+            state = self._protected_bans_state(guild.id)
+            state["last_enforce_at"] = now.isoformat()
+            state["last_enforce_restored"] = restored
+            state["last_enforce_source"] = source
+            self.store.set_service_state(guild.id, "protected_bans", state)
+            restored_by_guild[guild.id] = restored
+
+        return restored_by_guild
+
+    async def run_startup_protected_ban_check(self) -> None:
+        if not self.config.protected_bans_enabled or self._protected_ban_startup_check_done:
+            return
+        if self.config.protected_bans_auto_capture:
+            for guild in self.bot.guilds:
+                await self.sync_current_bans_to_protected(guild)
+        await self.enforce_protected_bans(force=True, source="startup")
+        self._protected_ban_startup_check_done = True
+
+    @tasks.loop(minutes=1)
+    async def protected_ban_enforcer(self) -> None:
+        await self.enforce_protected_bans(force=False, source="scheduler")
 
     @tasks.loop(minutes=1)
     async def steam_digest_scheduler(self) -> None:
@@ -682,6 +756,117 @@ class AuditCog(commands.Cog):
         protected.add(guild.owner_id)
         return protected
 
+    def _protected_bans_state(self, guild_id: int) -> dict[str, Any]:
+        return self.store.get_service_state(guild_id, "protected_bans")
+
+    def _protected_ban_entries(self, guild_id: int) -> dict[str, dict[str, Any]]:
+        state = self._protected_bans_state(guild_id)
+        entries = state.get("entries")
+        if not isinstance(entries, dict):
+            entries = {}
+            state["entries"] = entries
+            self.store.set_service_state(guild_id, "protected_bans", state)
+        return entries
+
+    def is_protected_ban(self, guild_id: int, user_id: int) -> bool:
+        return str(user_id) in self._protected_ban_entries(guild_id)
+
+    def protected_ban_count(self, guild_id: int) -> int:
+        return len(self._protected_ban_entries(guild_id))
+
+    def upsert_protected_ban(
+        self,
+        guild: discord.Guild,
+        user: discord.abc.User,
+        *,
+        actor: discord.abc.User | None = None,
+        reason: str | None = None,
+        source: str,
+    ) -> None:
+        state = self._protected_bans_state(guild.id)
+        entries = self._protected_ban_entries(guild.id)
+        key = str(user.id)
+        previous = entries.get(key, {})
+        entries[key] = {
+            "user_id": int(user.id),
+            "username": str(user),
+            "display_name": self.audit.display_name(user),
+            "reason": reason or previous.get("reason"),
+            "protected_at": previous.get("protected_at") or discord.utils.utcnow().isoformat(),
+            "last_ban_at": discord.utils.utcnow().isoformat(),
+            "protected_by_id": getattr(actor, "id", None) or previous.get("protected_by_id"),
+            "protected_by_name": self.audit.display_name(actor) if actor is not None else previous.get("protected_by_name"),
+            "source": source,
+        }
+        state["entries"] = entries
+        self.store.set_service_state(guild.id, "protected_bans", state)
+
+    def remove_protected_ban(self, guild_id: int, user_id: int) -> dict[str, Any] | None:
+        state = self._protected_bans_state(guild_id)
+        entries = self._protected_ban_entries(guild_id)
+        removed = entries.pop(str(user_id), None)
+        state["entries"] = entries
+        self.store.set_service_state(guild_id, "protected_bans", state)
+        return removed
+
+    def protected_ban_entry(self, guild_id: int, user_id: int) -> dict[str, Any] | None:
+        return self._protected_ban_entries(guild_id).get(str(user_id))
+
+    async def _ensure_owner_only(self, interaction: discord.Interaction) -> bool:
+        assert interaction.guild is not None
+        if interaction.user.id == interaction.guild.owner_id:
+            return True
+        message = "Эта команда только для владельца сервера."
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
+        return False
+
+    @staticmethod
+    def _parse_user_id(raw_value: str) -> int:
+        digits = "".join(ch for ch in raw_value if ch.isdigit())
+        if not digits:
+            raise ValueError("user_id")
+        return int(digits)
+
+    async def _fetch_recent_unban_entry(
+        self,
+        guild: discord.Guild,
+        target_id: int,
+        *,
+        attempts: int = 3,
+        delay_seconds: float = 1.0,
+    ) -> discord.AuditLogEntry | None:
+        for attempt in range(attempts):
+            entry = await self.audit.fetch_recent_audit_entry(
+                guild,
+                actions=[discord.AuditLogAction.member_ban_remove],
+                target_id=target_id,
+                max_age_seconds=30,
+            )
+            if entry is not None:
+                return entry
+            if attempt + 1 < attempts:
+                await asyncio.sleep(delay_seconds)
+        return None
+
+    async def sync_current_bans_to_protected(self, guild: discord.Guild, *, actor: discord.abc.User | None = None) -> int:
+        count = 0
+        async for ban_entry in guild.bans(limit=None):
+            before = self.protected_ban_count(guild.id)
+            self.upsert_protected_ban(
+                guild,
+                ban_entry.user,
+                actor=actor,
+                reason=ban_entry.reason,
+                source="sync_current_bans",
+            )
+            after = self.protected_ban_count(guild.id)
+            if after > before:
+                count += 1
+        return count
+
     def _steam_digest_last_sent_by_channel(self, guild_id: int) -> dict[str, str]:
         service_state = self.store.get_service_state(guild_id, "steam_digest")
         channel_dates = service_state.get("last_sent_by_channel")
@@ -883,6 +1068,7 @@ class AuditCog(commands.Cog):
         assert interaction.guild is not None
         saved = self.store.get_guild(interaction.guild.id)
         nickname_state = self._nickname_prefix_state(interaction.guild.id)
+        protected_bans_state = self._protected_bans_state(interaction.guild.id)
 
         lines = [f"Категория ID: `{saved.get('category_id')}`"]
         for key, definition in CHANNEL_DEFINITIONS.items():
@@ -907,6 +1093,14 @@ class AuditCog(commands.Cog):
             f" interval={self.config.nickname_prefix_resync_minutes}m,"
             f" pending={len(self._nickname_sync_queue)},"
             f" last_reason={nickname_state.get('last_queue_reason', 'n/a')}"
+        )
+        lines.append(
+            "Protected bans:"
+            f" enabled={_bool_label(self.config.protected_bans_enabled)},"
+            f" auto_capture={_bool_label(self.config.protected_bans_auto_capture)},"
+            f" count={self.protected_ban_count(interaction.guild.id)},"
+            f" enforce={self.config.protected_bans_enforce_minutes}m,"
+            f" last_restore={protected_bans_state.get('last_enforce_restored', 0)}"
         )
         protected_voice_guard_count = len(self.get_protected_voice_guard_user_ids(interaction.guild))
         lines.append(
@@ -969,6 +1163,95 @@ class AuditCog(commands.Cog):
                 f"Поставила в очередь **{queued}** участников для пересинхронизации ников. "
                 f"Worker идёт по одному участнику примерно раз в **1.5 сек**."
             ),
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="protected_bans_sync", description="Синхронизировать текущий бан-лист в owner-only защиту")
+    @app_commands.guild_only()
+    async def protected_bans_sync(self, interaction: discord.Interaction) -> None:
+        assert interaction.guild is not None
+        if not await self._ensure_owner_only(interaction):
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        if not self.config.protected_bans_enabled:
+            await interaction.followup.send(
+                "Защищённые пермабаны сейчас выключены в конфиге.",
+                ephemeral=True,
+            )
+            return
+
+        added = await self.sync_current_bans_to_protected(interaction.guild, actor=interaction.user)
+        await interaction.followup.send(
+            f"Синхронизировала текущий бан-лист. В owner-only защиту добавлено **{added}** банов.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="protected_bans_list", description="Показать owner-only список защищённых пермабанов")
+    @app_commands.guild_only()
+    async def protected_bans_list(self, interaction: discord.Interaction) -> None:
+        assert interaction.guild is not None
+        if not await self._ensure_owner_only(interaction):
+            return
+        entries = list(self._protected_ban_entries(interaction.guild.id).values())
+        if not entries:
+            await interaction.response.send_message("Список защищённых пермабанов сейчас пуст.", ephemeral=True)
+            return
+
+        lines = []
+        for entry in entries[:40]:
+            user_id = int(entry.get("user_id", 0) or 0)
+            label = str(entry.get("display_name") or entry.get("username") or user_id)
+            reason = str(entry.get("reason") or "без причины")
+            lines.append(f"`{user_id}` • {label} • {reason}")
+        message = "\n".join(lines)
+        if len(entries) > 40:
+            message += f"\n... и ещё {len(entries) - 40}"
+        await interaction.response.send_message(message[:1900], ephemeral=True)
+
+    @app_commands.command(name="protected_unban", description="Снять owner-only защиту и разбанить пользователя")
+    @app_commands.describe(user_id="ID пользователя или упоминание", reason="Причина разбана")
+    @app_commands.guild_only()
+    async def protected_unban(
+        self,
+        interaction: discord.Interaction,
+        user_id: str,
+        reason: str | None = None,
+    ) -> None:
+        assert interaction.guild is not None
+        if not await self._ensure_owner_only(interaction):
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        try:
+            target_id = self._parse_user_id(user_id)
+        except ValueError:
+            await interaction.followup.send("Не смогла распознать `user_id`.", ephemeral=True)
+            return
+
+        removed = self.remove_protected_ban(interaction.guild.id, target_id)
+        try:
+            await interaction.guild.unban(
+                discord.Object(id=target_id),
+                reason=reason or f"EVA protected unban by owner {interaction.user}",
+            )
+        except discord.NotFound:
+            await interaction.followup.send(
+                "Этого пользователя уже нет в бан-листе. Защиту я всё равно сняла." if removed else "Этого пользователя уже нет в бан-листе.",
+                ephemeral=True,
+            )
+            return
+        except (discord.Forbidden, discord.HTTPException) as error:
+            if removed is not None:
+                state = self._protected_bans_state(interaction.guild.id)
+                entries = self._protected_ban_entries(interaction.guild.id)
+                entries[str(target_id)] = removed
+                state["entries"] = entries
+                self.store.set_service_state(interaction.guild.id, "protected_bans", state)
+            await interaction.followup.send(f"Не смогла разбанить пользователя: {error}", ephemeral=True)
+            return
+
+        await interaction.followup.send(
+            f"Пользователь `{target_id}` снят с owner-only защиты и разбанен.",
             ephemeral=True,
         )
 
@@ -1277,6 +1560,18 @@ class AuditCog(commands.Cog):
             target_id = getattr(target, "id", 0)
             if target_id:
                 self.audit.remember_recent(guild.id, "member_banned", target_id)
+            if (
+                self.config.protected_bans_enabled
+                and self.config.protected_bans_auto_capture
+                and isinstance(target, (discord.User, discord.Member))
+            ):
+                self.upsert_protected_ban(
+                    guild,
+                    target,
+                    actor=entry.user,
+                    reason=entry.reason,
+                    source="audit_ban",
+                )
             await self.audit.send_event(
                 guild,
                 "member_banned",
@@ -1290,6 +1585,53 @@ class AuditCog(commands.Cog):
             target_id = getattr(target, "id", 0)
             if target_id:
                 self.audit.remember_recent(guild.id, "member_unbanned", target_id)
+            if self.config.protected_bans_enabled and target_id and self.is_protected_ban(guild.id, target_id):
+                if entry.user is not None and entry.user.id == guild.owner_id:
+                    self.remove_protected_ban(guild.id, target_id)
+                    fields = [("Статус защиты", "Снята владельцем сервера", False)]
+                    await self.audit.send_event(
+                        guild,
+                        "member_unbanned",
+                        f"{_display_name(entry.user, 'Владелец сервера')} лично вытащил **{_display_name(target)}** из owner-only бан-листа.",
+                        actor=entry.user,
+                        target=target,
+                        reason=entry.reason,
+                        fields=fields,
+                        related_users=[entry.user, target],
+                    )
+                    return
+
+                try:
+                    await guild.ban(
+                        target,
+                        reason=(
+                            "EVA protected perma-ban: "
+                            f"неавторизованный разбан пользователем {_display_name(entry.user, 'Неизвестно')}"
+                        ),
+                    )
+                except (discord.Forbidden, discord.HTTPException):
+                    pass
+
+                fields = [
+                    ("Кто может разбанить", "Только владелец сервера", False),
+                ]
+                protected_entry = self.protected_ban_entry(guild.id, target_id)
+                protected_reason = None if protected_entry is None else protected_entry.get("reason")
+                if protected_reason:
+                    fields.append(("Изначальная причина бана", str(protected_reason), False))
+                await self.audit.send_event(
+                    guild,
+                    "protected_ban_restored",
+                    f"{_display_name(entry.user, 'Кто-то из стаффа')} попытался разбанить **{_display_name(target)}**, но Ева вернула бан обратно.",
+                    actor=entry.user,
+                    target=target,
+                    reason=entry.reason,
+                    fields=fields,
+                    related_users=[entry.user, target],
+                    show_actor_field=True,
+                    show_target_field=True,
+                )
+                return
             await self.audit.send_event(
                 guild,
                 "member_unbanned",
@@ -1940,6 +2282,16 @@ class AuditCog(commands.Cog):
                 ("Возраст аккаунта", discord.utils.format_dt(member.created_at, style="R"), False),
             ],
             related_users=[member],
+        )
+
+    @commands.Cog.listener()
+    async def on_member_ban(self, guild: discord.Guild, user: discord.User | discord.Member) -> None:
+        if not self.config.protected_bans_enabled or not self.config.protected_bans_auto_capture:
+            return
+        self.upsert_protected_ban(
+            guild,
+            user,
+            source="member_ban_event",
         )
 
     @commands.Cog.listener()
