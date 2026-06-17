@@ -40,6 +40,9 @@ class BotConfig:
     nickname_prefix_excluded_user_ids: frozenset[int]
     nickname_prefix_resync_minutes: int
     ignored_channel_ids: frozenset[int]
+    protected_bans_enabled: bool
+    protected_bans_auto_capture: bool
+    protected_bans_enforce_minutes: int
     protected_voice_guard_enabled: bool
     protected_voice_guard_user_ids: frozenset[int]
     chat_banter_enabled: bool
@@ -159,6 +162,9 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
     nickname_prefix_excluded_user_ids = _parse_id_set_env("NICK_PREFIX_EXCLUDED_USER_IDS")
     nickname_prefix_resync_minutes = max(0, _parse_int_env("NICK_PREFIX_RESYNC_MINUTES", default=180))
     ignored_channel_ids = _parse_id_set_env("IGNORED_CHANNEL_IDS")
+    protected_bans_enabled = _parse_bool_env("PROTECTED_BANS_ENABLED", default=False)
+    protected_bans_auto_capture = _parse_bool_env("PROTECTED_BANS_AUTO_CAPTURE", default=True)
+    protected_bans_enforce_minutes = max(0, _parse_int_env("PROTECTED_BANS_ENFORCE_MINUTES", default=5))
     protected_voice_guard_enabled = _parse_bool_env("PROTECTED_VOICE_GUARD_ENABLED", default=False)
     protected_voice_guard_user_ids = _parse_id_set_env("PROTECTED_VOICE_GUARD_USER_IDS")
     chat_banter_enabled = _parse_bool_env("CHAT_BANTER_ENABLED", default=True)
@@ -196,6 +202,9 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
         nickname_prefix_excluded_user_ids=nickname_prefix_excluded_user_ids,
         nickname_prefix_resync_minutes=nickname_prefix_resync_minutes,
         ignored_channel_ids=ignored_channel_ids,
+        protected_bans_enabled=protected_bans_enabled,
+        protected_bans_auto_capture=protected_bans_auto_capture,
+        protected_bans_enforce_minutes=protected_bans_enforce_minutes,
         protected_voice_guard_enabled=protected_voice_guard_enabled,
         protected_voice_guard_user_ids=protected_voice_guard_user_ids,
         chat_banter_enabled=chat_banter_enabled,

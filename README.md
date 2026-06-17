@@ -151,6 +151,9 @@ NICK_PREFIX_LEGACY_PREFIXES=🎲;⭕️;🎖
 NICK_PREFIX_EXCLUDED_USER_IDS=495309668986388520
 NICK_PREFIX_RESYNC_MINUTES=180
 IGNORED_CHANNEL_IDS=1409209895382814821;1409209895382814822
+PROTECTED_BANS_ENABLED=false
+PROTECTED_BANS_AUTO_CAPTURE=true
+PROTECTED_BANS_ENFORCE_MINUTES=5
 PROTECTED_VOICE_GUARD_ENABLED=true
 PROTECTED_VOICE_GUARD_USER_IDS=220189945761890304;123456789012345678
 CHAT_BANTER_ENABLED=true
@@ -409,6 +412,24 @@ NICK_PREFIX_RULES=1389394678561902652=🌸,1354908419567521986=🥩
 - если у участника несколько ролей с префиксами, EVA берёт только префикс самой высокой роли
 - если роль сняли, EVA убирает управляемый префикс
 - фоновая проверка дрейфа никнеймов идёт по `NICK_PREFIX_RESYNC_MINUTES`, а вручную её можно дёрнуть командой `/nick_resync`
+
+## Защищённые пермабаны
+
+Если нужен режим, где разбанить определённых пользователей может только владелец сервера, включи:
+
+```env
+PROTECTED_BANS_ENABLED=true
+PROTECTED_BANS_AUTO_CAPTURE=true
+PROTECTED_BANS_ENFORCE_MINUTES=5
+```
+
+Логика:
+
+- новые баны автоматически попадают в owner-only список, если включён `PROTECTED_BANS_AUTO_CAPTURE`
+- чужой разбан такого пользователя EVA откатывает обратно
+- штатный путь для владельца: `/protected_bans_sync`, `/protected_bans_list`, `/protected_unban`
+- при старте EVA сначала подтягивает текущий бан-лист Discord в защитный список, а потом сразу сверяет его и возвращает разбаненных обратно
+- дальше периодическая сверка по `PROTECTED_BANS_ENFORCE_MINUTES` продолжает держать бан-лист в тонусе
 
 Ограничения Discord:
 
