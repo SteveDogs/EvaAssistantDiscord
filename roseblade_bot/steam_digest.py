@@ -19,6 +19,7 @@ import discord
 
 from roseblade_bot import EMBED_FOOTER
 from roseblade_bot.config import BotConfig
+from roseblade_bot.phrases import PHRASES
 from roseblade_bot.services.http import http_session
 
 
@@ -54,45 +55,12 @@ SUPPORT_ROW_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
-STEAM_DIGEST_INTROS = (
-    "Ева на связи. Принесла вечерний Steam-срез, пока у кого-то уже кипит катка.",
-    "Вечерний обход Steam готов. Смотрим, кто держит трон, а кто просто шумит красиво.",
-    "Я заглянула в Steam и принесла сухую выжимку без лишней воды. Почти без воды.",
-    "Короткий Steam-дайджест на вечер: кто в топе, где жара и сколько народу толпится у Valve.",
-    "Ева снова роется в цифрах, чтобы у сервера был нормальный вечерний расклад по Steam.",
-)
-
-STEAM_DIGEST_TITLES = (
-    "🌙 Вечерний Steam-дайджест",
-    "📡 Steam-сводка на вечер",
-    "🎮 Что творится в Steam",
-    "🔥 Steam вечером выглядит так",
-)
-
-STEAM_PUBG_LINES = (
-    "PUBG всё ещё держится уверенно и не собирается тихо уходить в тень.",
-    "PUBG снова в строю и шумит так, будто весь лут уже разобрали без вас.",
-    "PUBG в онлайне бодрится. Паника в лобби официально продолжается.",
-    "PUBG на радарах. Кто-то уже ищет дым, а кто-то алиби.",
-)
-
-STEAM_API_DOWN_LINES = (
-    "Steam Web API сегодня строит из себя молчуна. Бывает и у титанов плохое настроение.",
-    "Steam API сейчас отвечает холодно или вовсе молчит. Не драматизируем, но я записала.",
-    "С API у Steam сегодня лёгкая хандра. Остальную сводку всё равно дотащила.",
-)
-
-STEAM_DAILY_DEAL_LINES = (
-    "На витрине дня у Steam сегодня вот такой соблазн.",
-    "Steam сегодня сам подкинул скидку дня, я только красиво донесла.",
-    "Если кошелёк рядом, лучше держать его покрепче: скидка дня уже машет рукой.",
-)
-
-STEAM_WEEKEND_LINES = (
-    "На выходные Steam тоже не молчит, там уже подкинули пару приманок.",
-    "По уикенд-витрине у Steam тоже движ есть, так что вот короткая наводка.",
-    "На выходных Steam снова расставил ловушки для вашего баланса. Смотрим.",
-)
+STEAM_DIGEST_INTROS = PHRASES.steam_texts.get("digest_intros", ())
+STEAM_DIGEST_TITLES = PHRASES.steam_texts.get("digest_titles", ())
+STEAM_PUBG_LINES = PHRASES.steam_texts.get("pubg_lines", ())
+STEAM_API_DOWN_LINES = PHRASES.steam_texts.get("api_down_lines", ())
+STEAM_DAILY_DEAL_LINES = PHRASES.steam_texts.get("daily_deal_lines", ())
+STEAM_WEEKEND_LINES = PHRASES.steam_texts.get("weekend_lines", ())
 
 
 @dataclass(frozen=True, slots=True)
