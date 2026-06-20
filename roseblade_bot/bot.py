@@ -5,52 +5,16 @@ Copyright (c) 2026 Steve Dogs Studio.
 
 from __future__ import annotations
 
-from collections import deque
-from datetime import datetime
-from typing import Any
-
 import discord
 from discord.ext import commands
 
 from roseblade_bot.audit_logger import AuditLogger
-from roseblade_bot.audit_cog_commands import AuditCogCommandsMixin
-from roseblade_bot.audit_cog_events import AuditCogEventsMixin
-from roseblade_bot.audit_cog_runtime import AuditCogRuntimeMixin
 from roseblade_bot.config import BotConfig, load_config
+from roseblade_bot.cogs import EvaCommandsCog, EvaCoreCog, EvaEventsCog, EvaSharedState
 from roseblade_bot.pubg_lookup import PubgLookupService
 from roseblade_bot.server_banner import ServerBannerService
 from roseblade_bot.steam_digest import SteamDigestService
 from roseblade_bot.storage import JsonStateStore
-
-
-class AuditCog(AuditCogCommandsMixin, AuditCogEventsMixin, AuditCogRuntimeMixin, commands.Cog):
-    def __init__(self, bot: commands.Bot, config: BotConfig, store: JsonStateStore) -> None:
-        self.bot = bot
-        self.config = config
-        self.store = store
-        self._bootstrapped_guild_ids: set[int] = set()
-        self._voice_sessions: dict[tuple[int, int], datetime] = {}
-        self._stream_sessions: dict[tuple[int, int], datetime] = {}
-        self._camera_sessions: dict[tuple[int, int], datetime] = {}
-        self._managed_nickname_updates: dict[tuple[int, int], datetime] = {}
-        self._nickname_sync_queue: deque[tuple[int, int]] = deque()
-        self._nickname_sync_pending: set[tuple[int, int]] = set()
-        self._chat_banter_last_channel_reply: dict[tuple[int, int], datetime] = {}
-        self._chat_banter_last_user_reply: dict[tuple[int, int], datetime] = {}
-        self._chat_banter_last_channel_text: dict[tuple[int, int], str] = {}
-        self._protected_voice_guard_recent: dict[tuple[int, int, int, int | None], datetime] = {}
-        self._protected_ban_startup_check_done = False
-        self._server_banner_startup_refresh_done = False
-        self.pubg_lookup = PubgLookupService(config)
-        self.steam_digest = SteamDigestService(config)
-        self.server_banner = ServerBannerService(config)
-        self.audit = AuditLogger(
-            store=store,
-            default_category_name=config.audit_category_name,
-            default_category_id=config.audit_category_id,
-            static_ignored_channel_ids=config.ignored_channel_ids,
-        )
-
 
 def build_bot(config: BotConfig) -> commands.Bot:
     intents = discord.Intents.default()
@@ -63,10 +27,25 @@ def build_bot(config: BotConfig) -> commands.Bot:
 
     bot = commands.Bot(command_prefix="!", intents=intents, max_messages=10000)
     store = JsonStateStore(config.state_file)
-    cog = AuditCog(bot, config, store)
+    shared = EvaSharedState(
+        bot=bot,
+        config=config,
+        store=store,
+        pubg_lookup=PubgLookupService(config),
+        steam_digest=SteamDigestService(config),
+        server_banner=ServerBannerService(config),
+        audit=AuditLogger(
+            store=store,
+            default_category_name=config.audit_category_name,
+            default_category_id=config.audit_category_id,
+            static_ignored_channel_ids=config.ignored_channel_ids,
+        ),
+    )
 
     async def setup() -> None:
-        await bot.add_cog(cog)
+        await bot.add_cog(EvaCoreCog(shared))
+        await bot.add_cog(EvaCommandsCog(shared))
+        await bot.add_cog(EvaEventsCog(shared))
         if config.guild_id:
             guild = discord.Object(id=config.guild_id)
             bot.tree.copy_global_to(guild=guild)
