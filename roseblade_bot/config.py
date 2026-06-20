@@ -34,6 +34,7 @@ class BotConfig:
     audit_category_id: int | None
     state_file: Path
     enable_members_intent: bool
+    enable_presences_intent: bool
     enable_message_content_intent: bool
     nickname_prefix_rules: dict[int, str]
     nickname_prefix_legacy_prefixes: frozenset[str]
@@ -66,6 +67,12 @@ class BotConfig:
     steam_digest_timezone: str
     steam_digest_top_count: int
     steam_digest_include_support_stats: bool
+    server_banner_enabled: bool
+    server_banner_update_minutes: int
+    server_banner_title: str
+    server_banner_background_url: str
+    server_banner_background_path: Path | None
+    server_banner_font_path: Path | None
 
 
 def _parse_bool_env(name: str, default: bool = False) -> bool:
@@ -101,6 +108,16 @@ def _parse_id_set_env(name: str) -> frozenset[int]:
             continue
         values.add(int(entry))
     return frozenset(values)
+
+
+def _parse_optional_path_env(name: str, root_dir: Path) -> Path | None:
+    raw_value = os.getenv(name, "").strip()
+    if not raw_value:
+        return None
+    raw_path = Path(raw_value)
+    if raw_path.is_absolute():
+        return raw_path
+    return (root_dir / raw_path).resolve()
 
 
 def _parse_nickname_prefix_rules(name: str) -> dict[int, str]:
@@ -156,6 +173,7 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
     state_file_raw = os.getenv("STATE_FILE", "data/audit_state.json").strip() or "data/audit_state.json"
     state_file = (root_dir / state_file_raw).resolve()
     enable_members_intent = _parse_bool_env("ENABLE_MEMBERS_INTENT", default=False)
+    enable_presences_intent = _parse_bool_env("ENABLE_PRESENCES_INTENT", default=False)
     enable_message_content_intent = _parse_bool_env("ENABLE_MESSAGE_CONTENT_INTENT", default=False)
     nickname_prefix_rules = _parse_nickname_prefix_rules("NICK_PREFIX_RULES")
     nickname_prefix_legacy_prefixes = _parse_string_set_env("NICK_PREFIX_LEGACY_PREFIXES")
@@ -188,6 +206,12 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
     steam_digest_timezone = os.getenv("STEAM_DIGEST_TIMEZONE", "Europe/Simferopol").strip() or "Europe/Simferopol"
     steam_digest_top_count = min(25, max(5, _parse_int_env("STEAM_DIGEST_TOP_COUNT", default=15)))
     steam_digest_include_support_stats = _parse_bool_env("STEAM_DIGEST_INCLUDE_SUPPORT_STATS", default=True)
+    server_banner_enabled = _parse_bool_env("SERVER_BANNER_ENABLED", default=False)
+    server_banner_update_minutes = max(1, _parse_int_env("SERVER_BANNER_UPDATE_MINUTES", default=2))
+    server_banner_title = os.getenv("SERVER_BANNER_TITLE", "").strip()
+    server_banner_background_url = os.getenv("SERVER_BANNER_BACKGROUND_URL", "").strip()
+    server_banner_background_path = _parse_optional_path_env("SERVER_BANNER_BACKGROUND_PATH", root_dir)
+    server_banner_font_path = _parse_optional_path_env("SERVER_BANNER_FONT_PATH", root_dir)
 
     return BotConfig(
         token=token,
@@ -196,6 +220,7 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
         audit_category_id=audit_category_id,
         state_file=state_file,
         enable_members_intent=enable_members_intent,
+        enable_presences_intent=enable_presences_intent,
         enable_message_content_intent=enable_message_content_intent,
         nickname_prefix_rules=nickname_prefix_rules,
         nickname_prefix_legacy_prefixes=nickname_prefix_legacy_prefixes,
@@ -228,4 +253,10 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
         steam_digest_timezone=steam_digest_timezone,
         steam_digest_top_count=steam_digest_top_count,
         steam_digest_include_support_stats=steam_digest_include_support_stats,
+        server_banner_enabled=server_banner_enabled,
+        server_banner_update_minutes=server_banner_update_minutes,
+        server_banner_title=server_banner_title,
+        server_banner_background_url=server_banner_background_url,
+        server_banner_background_path=server_banner_background_path,
+        server_banner_font_path=server_banner_font_path,
     )

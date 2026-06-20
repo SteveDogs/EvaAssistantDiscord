@@ -8,7 +8,8 @@ authors = [
   { name = "Steve Dogs Studio", email = "istevedogs@gmail.com" }
 ]
 dependencies = [
-  "discord.py>=2.7,<3.0"
+  "discord.py>=2.7,<3.0",
+  "Pillow>=10,<12"
 ]
 
 [build-system]
