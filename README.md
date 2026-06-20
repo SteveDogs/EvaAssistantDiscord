@@ -18,6 +18,7 @@
 - умеет автоматически ставить префиксы в ники по ролям
 - умеет иногда кокетливо троллить мат в чате вместо тупого наказания
 - умеет публиковать вечерний Steam-дайджест по расписанию
+- умеет обновлять live-баннер сервера с онлайном, войсом и boost-уровнем
 - поддерживает фирменный стиль и более живую подачу в embed-логах
 
 ## Зачем EVA
@@ -78,6 +79,19 @@ EVA умеет раз в день публиковать небольшой Stea
 Для теста без ожидания вечера есть slash-команда:
 
 - `/steam_digest_now`
+
+### Живой баннер сервера
+
+EVA умеет обновлять баннер Discord-сервера по расписанию и рисовать поверх него живую статистику:
+
+- участников сервера
+- онлайн прямо сейчас
+- людей в voice/stage
+- boost level и число бустов
+
+Под это есть отдельная slash-команда для ручного прогона:
+
+- `/server_banner_now`
 
 ### Какие события логируются
 
@@ -145,6 +159,7 @@ AUDIT_CATEGORY_NAME=Аудит
 AUDIT_CATEGORY_ID=
 STATE_FILE=data/audit_state.json
 ENABLE_MEMBERS_INTENT=false
+ENABLE_PRESENCES_INTENT=false
 ENABLE_MESSAGE_CONTENT_INTENT=false
 NICK_PREFIX_RULES=1389394678561902652=🌸;1354908419567521986=🥩;1354908419332509762=💎;1388621626710429756=⭐️;1354908419332509764=👑;1354908419332509761=⚙️;1354908419332509759=🍉;1354908419332509757=🌸;1354908418846232625=🌹;1354908419332509758=🎦;1354908418846232624=🍺
 NICK_PREFIX_LEGACY_PREFIXES=🎲;⭕️;🎖
@@ -175,6 +190,12 @@ STEAM_DIGEST_MINUTE=0
 STEAM_DIGEST_TIMEZONE=Europe/Simferopol
 STEAM_DIGEST_TOP_COUNT=15
 STEAM_DIGEST_INCLUDE_SUPPORT_STATS=true
+SERVER_BANNER_ENABLED=false
+SERVER_BANNER_UPDATE_MINUTES=2
+SERVER_BANNER_TITLE=ROSE BLADE
+SERVER_BANNER_BACKGROUND_URL=
+SERVER_BANNER_BACKGROUND_PATH=roseblade_bot/assets/background.png
+SERVER_BANNER_FONT_PATH=
 PUBG_API_KEY=
 STEAM_API_KEY=
 ```
@@ -206,6 +227,7 @@ python main.py
 
 - `Manage Roles`
 - `Manage Nicknames`
+- `Manage Server`
 - `Move Members`
 - `Moderate Members`
 - `Manage Messages`
@@ -215,12 +237,14 @@ python main.py
 Для полного покрытия логов в Discord Developer Portal желательно включить:
 
 - `Server Members Intent`
+- `Presence Intent`
 - `Message Content Intent`
 
 После этого нужно отразить это в `.env`:
 
 ```env
 ENABLE_MEMBERS_INTENT=true
+ENABLE_PRESENCES_INTENT=true
 ENABLE_MESSAGE_CONTENT_INTENT=true
 ```
 
@@ -229,6 +253,8 @@ ENABLE_MESSAGE_CONTENT_INTENT=true
 Для самых полезных логов удаления сообщений и pin/unpin желательно отдельно включать именно `Message Content Intent`, иначе Discord не всегда отдаёт текст сообщения боту.
 Для автопрефиксов в никах по ролям желательно включить именно `Server Members Intent`, иначе Discord не сможет надёжно отслеживать каждую смену ника и ролей.
 Для игривых ответов EVA на мат в чате `Message Content Intent` обязателен, иначе бот просто не увидит текст сообщений.
+
+Для live-баннера с цифрой онлайна нужен именно `Presence Intent`, иначе строка онлайна будет показываться как `н/д`.
 
 ## Steam-дайджест
 
@@ -254,6 +280,35 @@ STEAM_DIGEST_INCLUDE_SUPPORT_STATS=true
 
 Даже если бот перезапустится позже `20:00`, EVA догонит пропущенный пост в этот же день и не задублирует его повторно после рестарта.
 Для ручной проверки без ожидания расписания используй `/steam_digest_now`.
+
+## Live-баннер сервера
+
+Если хочется, чтобы EVA каждые 2 минуты обновляла шапку Discord-сервера и рисовала на ней живую статистику, включи блок:
+
+```env
+SERVER_BANNER_ENABLED=true
+SERVER_BANNER_UPDATE_MINUTES=2
+SERVER_BANNER_TITLE=ROSE BLADE
+SERVER_BANNER_BACKGROUND_URL=
+SERVER_BANNER_BACKGROUND_PATH=roseblade_bot/assets/background.png
+SERVER_BANNER_FONT_PATH=
+```
+
+Пояснение:
+
+- `SERVER_BANNER_UPDATE_MINUTES` — как часто EVA проверяет изменения и перерисовывает баннер
+- `SERVER_BANNER_TITLE` — крупный заголовок на баннере, если нужен не `guild.name`
+- `SERVER_BANNER_BACKGROUND_URL` — фон по прямой ссылке, если нужен внешний источник
+- `SERVER_BANNER_BACKGROUND_PATH` — локальный файл; если путь не указан, EVA попробует встроенный `roseblade_bot/assets/background.png`
+- `SERVER_BANNER_FONT_PATH` — свой `.ttf`, если нужен фирменный шрифт
+
+Важно:
+
+- для апдейта шапки у бота должно быть право `Manage Server`
+- для точного онлайна нужен `Presence Intent`
+- если кастомный фон временно недоступен, EVA соберёт fallback-баннер и не уронит весь бот
+- иконки для карточек EVA берёт из `roseblade_bot/assets/microphone.png` и `roseblade_bot/assets/user.png`
+- для ручной проверки используй `/server_banner_now`
 
 ## Игривые ответы EVA в чате
 
