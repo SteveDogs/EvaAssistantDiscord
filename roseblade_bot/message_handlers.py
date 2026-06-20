@@ -83,7 +83,7 @@ async def handle_on_message_delete(cog: AuditCog, message: discord.Message) -> N
             "Сообщение",
             _format_deleted_message_body(
                 message,
-                message_content_intent_enabled=cog.config.enable_message_content_intent,
+                message_content_intent_enabled=cog.config.discord.intents.message_content,
             ),
             False,
         ),

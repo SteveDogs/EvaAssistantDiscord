@@ -207,28 +207,28 @@ class SteamDigestService:
             578080: "PUBG: BATTLEGROUNDS",
         }
         try:
-            self.timezone = ZoneInfo(config.steam_digest_timezone)
+            self.timezone = ZoneInfo(config.steam.timezone)
         except ZoneInfoNotFoundError:
-            offset_hours = TIMEZONE_FALLBACK_HOURS.get(config.steam_digest_timezone, 0)
-            self.timezone = timezone(timedelta(hours=offset_hours), name=config.steam_digest_timezone)
+            offset_hours = TIMEZONE_FALLBACK_HOURS.get(config.steam.timezone, 0)
+            self.timezone = timezone(timedelta(hours=offset_hours), name=config.steam.timezone)
 
     @property
     def is_enabled(self) -> bool:
-        return self.config.steam_digest_enabled
+        return self.config.steam.enabled
 
     @property
     def is_configured(self) -> bool:
-        return self.is_enabled and bool(self.config.steam_digest_channel_ids)
+        return self.is_enabled and bool(self.config.steam.channel_ids)
 
     def channel_count(self) -> int:
-        return len(self.config.steam_digest_channel_ids)
+        return len(self.config.steam.channel_ids)
 
     def schedule_label(self) -> str:
-        return f"{self.config.steam_digest_hour:02d}:{self.config.steam_digest_minute:02d} ({self.config.steam_digest_timezone})"
+        return f"{self.config.steam.hour:02d}:{self.config.steam.minute:02d} ({self.config.steam.timezone})"
 
     def is_due(self, now: datetime) -> bool:
         local_now = now.astimezone(self.timezone)
-        scheduled_minutes = self.config.steam_digest_hour * 60 + self.config.steam_digest_minute
+        scheduled_minutes = self.config.steam.hour * 60 + self.config.steam.minute
         current_minutes = local_now.hour * 60 + local_now.minute
         return current_minutes >= scheduled_minutes
 
@@ -240,13 +240,13 @@ class SteamDigestService:
         async with http_session(timeout_total=25, headers=headers) as session:
             steam_server_time, steam_api_latency_ms = await self._fetch_server_info(session)
             chart_rollup_date, ranked_candidates = await self._fetch_most_played_candidates(session)
-            support = await self._fetch_support_snapshot(session) if self.config.steam_digest_include_support_stats else None
+            support = await self._fetch_support_snapshot(session) if self.config.steam.include_support_stats else None
             daily_promotion_raw, weekend_promotions_raw = await self._fetch_store_promotions(session)
 
             candidate_appids = [appid for _, appid, _, _ in ranked_candidates]
             current_players = await self._fetch_current_player_counts(session, candidate_appids)
             sorted_appids = sorted(candidate_appids, key=lambda appid: current_players.get(appid, 0), reverse=True)
-            selected_appids = sorted_appids[: self.config.steam_digest_top_count]
+            selected_appids = sorted_appids[: self.config.steam.top_count]
 
             needed_names = set(selected_appids)
             needed_names.add(PUBG_APP_ID)

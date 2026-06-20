@@ -87,7 +87,7 @@ class ServerBannerService:
 
     @property
     def is_enabled(self) -> bool:
-        return self.config.server_banner_enabled
+        return self.config.banner.enabled
 
     @property
     def dependencies_ready(self) -> bool:
@@ -95,21 +95,21 @@ class ServerBannerService:
 
     @property
     def online_count_supported(self) -> bool:
-        return self.config.enable_members_intent and self.config.enable_presences_intent
+        return self.config.discord.intents.members and self.config.discord.intents.presences
 
     def channel_count(self) -> int:
         return 1 if self.is_enabled else 0
 
     def schedule_label(self) -> str:
-        return f"every {self.config.server_banner_update_minutes}m"
+        return f"every {self.config.banner.update_minutes}m"
 
     def custom_background_label(self) -> str:
-        if self.config.server_banner_background_path is not None:
-            return str(self.config.server_banner_background_path)
+        if self.config.banner.background_path is not None:
+            return str(self.config.banner.background_path)
         if BUNDLED_BACKGROUND_PATH.exists():
             return str(BUNDLED_BACKGROUND_PATH)
-        if self.config.server_banner_background_url:
-            return self.config.server_banner_background_url
+        if self.config.banner.background_url:
+            return self.config.banner.background_url
         return "fallback"
 
     def dependency_error(self) -> str | None:
@@ -138,7 +138,7 @@ class ServerBannerService:
             for channel in [*guild.voice_channels, *guild.stage_channels]
             for member in channel.members
         }
-        title = (self.config.server_banner_title.strip() or guild.name).strip().upper()
+        title = (self.config.banner.title.strip() or guild.name).strip().upper()
         return ServerBannerStats(
             title=title,
             member_count=member_count,
@@ -192,8 +192,8 @@ class ServerBannerService:
             if now <= self._background_cache_expires_at:
                 return self._background_cache_bytes
 
-        if self.config.server_banner_background_path is not None and self.config.server_banner_background_path.exists():
-            data = self.config.server_banner_background_path.read_bytes()
+        if self.config.banner.background_path is not None and self.config.banner.background_path.exists():
+            data = self.config.banner.background_path.read_bytes()
             self._cache_background(data, now)
             return data
 
@@ -202,11 +202,11 @@ class ServerBannerService:
             self._cache_background(data, now)
             return data
 
-        if self.config.server_banner_background_url:
+        if self.config.banner.background_url:
             headers = {"User-Agent": f"{APP_NAME} live banner / {BRAND_SIGNATURE}"}
             try:
                 data, _ = await fetch_bytes(
-                    self.config.server_banner_background_url,
+                    self.config.banner.background_url,
                     headers=headers,
                     timeout_total=15,
                 )
@@ -220,7 +220,7 @@ class ServerBannerService:
         return self._background_cache_bytes
 
     def _cache_background(self, data: bytes, now: datetime) -> None:
-        cache_minutes = max(15, self.config.server_banner_update_minutes * 3)
+        cache_minutes = max(15, self.config.banner.update_minutes * 3)
         self._background_cache_bytes = data
         self._background_cache_expires_at = now + timedelta(minutes=cache_minutes)
 
@@ -597,8 +597,8 @@ class ServerBannerService:
         assert ImageFont is not None
 
         candidates: list[Path] = []
-        if self.config.server_banner_font_path is not None:
-            candidates.append(self.config.server_banner_font_path)
+        if self.config.banner.font_path is not None:
+            candidates.append(self.config.banner.font_path)
         candidates.extend(FONT_CANDIDATES)
 
         for candidate in candidates:
