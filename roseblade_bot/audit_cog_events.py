@@ -82,8 +82,8 @@ class AuditCogEventsMixin:
             if target_id:
                 self.audit.remember_recent(guild.id, "member_banned", target_id)
             if (
-                self.config.protected_bans_enabled
-                and self.config.protected_bans_auto_capture
+                self.config.protection.bans.enabled
+                and self.config.protection.bans.auto_capture
                 and isinstance(target, (discord.User, discord.Member))
             ):
                 self.upsert_protected_ban(
@@ -106,7 +106,7 @@ class AuditCogEventsMixin:
             target_id = getattr(target, "id", 0)
             if target_id:
                 self.audit.remember_recent(guild.id, "member_unbanned", target_id)
-            if self.config.protected_bans_enabled and target_id and self.is_protected_ban(guild.id, target_id):
+            if self.config.protection.bans.enabled and target_id and self.is_protected_ban(guild.id, target_id):
                 if entry.user is not None and entry.user.id == guild.owner_id:
                     self.remove_protected_ban(guild.id, target_id)
                     fields = [("Статус защиты", "Снята владельцем сервера", False)]
@@ -807,7 +807,7 @@ class AuditCogEventsMixin:
 
     @commands.Cog.listener()
     async def on_member_ban(self, guild: discord.Guild, user: discord.User | discord.Member) -> None:
-        if not self.config.protected_bans_enabled or not self.config.protected_bans_auto_capture:
+        if not self.config.protection.bans.enabled or not self.config.protection.bans.auto_capture:
             return
         self.upsert_protected_ban(
             guild,

@@ -58,63 +58,63 @@ class AuditCogCommandsMixin:
         lines.append(f"Отключённых событий: `{len(disabled_events)}`")
         lines.append(
             "Intents:"
-            f" members={_bool_label(self.config.enable_members_intent)},"
-            f" presences={_bool_label(self.config.enable_presences_intent)},"
-            f" message_content={_bool_label(self.config.enable_message_content_intent)}"
+            f" members={_bool_label(self.config.discord.intents.members)},"
+            f" presences={_bool_label(self.config.discord.intents.presences)},"
+            f" message_content={_bool_label(self.config.discord.intents.message_content)}"
         )
-        lines.append(f"Префиксы ников: `{len(self.config.nickname_prefix_rules)}`")
+        lines.append(f"Префиксы ников: `{len(self.config.nickname_prefix.rules)}`")
         lines.append(
             "Nick sync:"
-            f" legacy={len(self.config.nickname_prefix_legacy_prefixes)},"
-            f" excluded={len(self.config.nickname_prefix_excluded_user_ids)},"
-            f" interval={self.config.nickname_prefix_resync_minutes}m,"
+            f" legacy={len(self.config.nickname_prefix.legacy_prefixes)},"
+            f" excluded={len(self.config.nickname_prefix.excluded_user_ids)},"
+            f" interval={self.config.nickname_prefix.resync_minutes}m,"
             f" pending={len(self._nickname_sync_queue)},"
             f" last_reason={nickname_state.get('last_queue_reason', 'n/a')}"
         )
         lines.append(
             "Protected bans:"
-            f" enabled={_bool_label(self.config.protected_bans_enabled)},"
-            f" auto_capture={_bool_label(self.config.protected_bans_auto_capture)},"
+            f" enabled={_bool_label(self.config.protection.bans.enabled)},"
+            f" auto_capture={_bool_label(self.config.protection.bans.auto_capture)},"
             f" count={self.protected_ban_count(interaction.guild.id)},"
-            f" enforce={self.config.protected_bans_enforce_minutes}m,"
+            f" enforce={self.config.protection.bans.enforce_minutes}m,"
             f" last_restore={protected_bans_state.get('last_enforce_restored', 0)}"
         )
         protected_voice_guard_count = len(self.get_protected_voice_guard_user_ids(interaction.guild))
         lines.append(
             "Voice guard:"
-            f" enabled={_bool_label(self.config.protected_voice_guard_enabled)},"
+            f" enabled={_bool_label(self.config.protection.voice_guard.enabled)},"
             f" protected={protected_voice_guard_count},"
             f" phrases={VOICE_GUARD.variants_count}"
         )
         lines.append(
             "Chat EVA:"
-            f" enabled={_bool_label(self.config.chat_banter_enabled)},"
-            f" chance={self.config.chat_banter_reply_chance:.2f},"
+            f" enabled={_bool_label(self.config.chat_banter.enabled)},"
+            f" chance={self.config.chat_banter.reply_chance:.2f},"
             f" variants={CHAT_BANTER.reply_variants_count}"
         )
         lines.append(
             "PUBG lookup:"
-            f" enabled={_bool_label(self.config.pubg_lookup_enabled)},"
+            f" enabled={_bool_label(self.config.pubg.enabled)},"
             f" configured={_bool_label(self.pubg_lookup.is_configured)},"
             f" channels={self.pubg_lookup.channel_count()},"
             f" roles={self.pubg_lookup.allowed_role_count()},"
-            f" platform={self.config.pubg_platform},"
-            f" ranked={_bool_label(self.config.pubg_lookup_include_ranked)},"
-            f" lifetime={_bool_label(self.config.pubg_lookup_include_lifetime_stats)},"
+            f" platform={self.config.pubg.platform},"
+            f" ranked={_bool_label(self.config.pubg.include_ranked)},"
+            f" lifetime={_bool_label(self.config.pubg.include_lifetime_stats)},"
             f" steam_key={_bool_label(self.pubg_lookup.has_steam_key())}"
         )
         lines.append(
             "Steam digest:"
-            f" enabled={_bool_label(self.config.steam_digest_enabled)},"
+            f" enabled={_bool_label(self.config.steam.enabled)},"
             f" configured={_bool_label(self.steam_digest.is_configured)},"
             f" channels={self.steam_digest.channel_count()},"
             f" schedule={self.steam_digest.schedule_label()},"
-            f" top={self.config.steam_digest_top_count},"
-            f" support={_bool_label(self.config.steam_digest_include_support_stats)}"
+            f" top={self.config.steam.top_count},"
+            f" support={_bool_label(self.config.steam.include_support_stats)}"
         )
         lines.append(
             "Server banner:"
-            f" enabled={_bool_label(self.config.server_banner_enabled)},"
+            f" enabled={_bool_label(self.config.banner.enabled)},"
             f" interval={self.server_banner.schedule_label()},"
             f" online={_bool_label(self.server_banner.online_count_supported)},"
             f" bg={self.server_banner.custom_background_label()},"
@@ -158,7 +158,7 @@ class AuditCogCommandsMixin:
         if not await self._ensure_owner_only(interaction):
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
-        if not self.config.protected_bans_enabled:
+        if not self.config.protection.bans.enabled:
             await interaction.followup.send(
                 "Защищённые пермабаны сейчас выключены в конфиге.",
                 ephemeral=True,

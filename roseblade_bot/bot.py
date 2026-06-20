@@ -19,14 +19,14 @@ from roseblade_bot.storage import JsonStateStore
 def build_bot(config: BotConfig) -> commands.Bot:
     intents = discord.Intents.default()
     intents.guilds = True
-    intents.members = config.enable_members_intent
-    intents.presences = config.enable_presences_intent
+    intents.members = config.discord.intents.members
+    intents.presences = config.discord.intents.presences
     intents.guild_messages = True
-    intents.message_content = config.enable_message_content_intent
+    intents.message_content = config.discord.intents.message_content
     intents.voice_states = True
 
     bot = commands.Bot(command_prefix="!", intents=intents, max_messages=10000)
-    store = JsonStateStore(config.state_file)
+    store = JsonStateStore(config.discord.state_file)
     shared = EvaSharedState(
         bot=bot,
         config=config,
@@ -36,9 +36,9 @@ def build_bot(config: BotConfig) -> commands.Bot:
         server_banner=ServerBannerService(config),
         audit=AuditLogger(
             store=store,
-            default_category_name=config.audit_category_name,
-            default_category_id=config.audit_category_id,
-            static_ignored_channel_ids=config.ignored_channel_ids,
+            default_category_name=config.audit.category_name,
+            default_category_id=config.audit.category_id,
+            static_ignored_channel_ids=config.audit.ignored_channel_ids,
         ),
     )
 
@@ -46,8 +46,8 @@ def build_bot(config: BotConfig) -> commands.Bot:
         await bot.add_cog(EvaCoreCog(shared))
         await bot.add_cog(EvaCommandsCog(shared))
         await bot.add_cog(EvaEventsCog(shared))
-        if config.guild_id:
-            guild = discord.Object(id=config.guild_id)
+        if config.discord.guild_id:
+            guild = discord.Object(id=config.discord.guild_id)
             bot.tree.copy_global_to(guild=guild)
             await bot.tree.sync(guild=guild)
         else:
@@ -60,4 +60,4 @@ def build_bot(config: BotConfig) -> commands.Bot:
 def main() -> None:
     config = load_config()
     bot = build_bot(config)
-    bot.run(config.token)
+    bot.run(config.discord.token)

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 import re
+from typing import Any
 
 
 def _load_dotenv(dotenv_path: Path) -> None:
@@ -27,52 +28,165 @@ def _load_dotenv(dotenv_path: Path) -> None:
 
 
 @dataclass(slots=True)
-class BotConfig:
+class DiscordIntentsConfig:
+    members: bool
+    presences: bool
+    message_content: bool
+
+
+@dataclass(slots=True)
+class DiscordConfig:
     token: str
     guild_id: int | None
-    audit_category_name: str
-    audit_category_id: int | None
     state_file: Path
-    enable_members_intent: bool
-    enable_presences_intent: bool
-    enable_message_content_intent: bool
-    nickname_prefix_rules: dict[int, str]
-    nickname_prefix_legacy_prefixes: frozenset[str]
-    nickname_prefix_excluded_user_ids: frozenset[int]
-    nickname_prefix_resync_minutes: int
+    intents: DiscordIntentsConfig
+
+
+@dataclass(slots=True)
+class AuditConfig:
+    category_name: str
+    category_id: int | None
     ignored_channel_ids: frozenset[int]
-    protected_bans_enabled: bool
-    protected_bans_auto_capture: bool
-    protected_bans_enforce_minutes: int
-    protected_voice_guard_enabled: bool
-    protected_voice_guard_user_ids: frozenset[int]
-    chat_banter_enabled: bool
-    chat_banter_reply_chance: float
-    chat_banter_channel_cooldown_seconds: int
-    chat_banter_user_cooldown_seconds: int
-    pubg_lookup_enabled: bool
-    pubg_lookup_channel_ids: frozenset[int]
-    pubg_lookup_allowed_role_ids: frozenset[int]
-    pubg_api_key: str
+
+
+@dataclass(slots=True)
+class NicknamePrefixConfig:
+    rules: dict[int, str]
+    legacy_prefixes: frozenset[str]
+    excluded_user_ids: frozenset[int]
+    resync_minutes: int
+
+
+@dataclass(slots=True)
+class ProtectedBanConfig:
+    enabled: bool
+    auto_capture: bool
+    enforce_minutes: int
+
+
+@dataclass(slots=True)
+class ProtectedVoiceGuardConfig:
+    enabled: bool
+    user_ids: frozenset[int]
+
+
+@dataclass(slots=True)
+class ProtectionConfig:
+    bans: ProtectedBanConfig
+    voice_guard: ProtectedVoiceGuardConfig
+
+
+@dataclass(slots=True)
+class ChatBanterConfig:
+    enabled: bool
+    reply_chance: float
+    channel_cooldown_seconds: int
+    user_cooldown_seconds: int
+
+
+@dataclass(slots=True)
+class PubgConfig:
+    enabled: bool
+    channel_ids: frozenset[int]
+    allowed_role_ids: frozenset[int]
+    api_key: str
     steam_api_key: str
-    pubg_platform: str
-    pubg_lookup_include_ranked: bool
-    pubg_lookup_include_lifetime_stats: bool
-    pubg_lookup_cache_ttl_seconds: int
-    pubg_lookup_user_cooldown_seconds: int
-    steam_digest_enabled: bool
-    steam_digest_channel_ids: frozenset[int]
-    steam_digest_hour: int
-    steam_digest_minute: int
-    steam_digest_timezone: str
-    steam_digest_top_count: int
-    steam_digest_include_support_stats: bool
-    server_banner_enabled: bool
-    server_banner_update_minutes: int
-    server_banner_title: str
-    server_banner_background_url: str
-    server_banner_background_path: Path | None
-    server_banner_font_path: Path | None
+    platform: str
+    include_ranked: bool
+    include_lifetime_stats: bool
+    cache_ttl_seconds: int
+    user_cooldown_seconds: int
+
+
+@dataclass(slots=True)
+class SteamDigestConfig:
+    enabled: bool
+    channel_ids: frozenset[int]
+    hour: int
+    minute: int
+    timezone: str
+    top_count: int
+    include_support_stats: bool
+
+
+@dataclass(slots=True)
+class ServerBannerConfig:
+    enabled: bool
+    update_minutes: int
+    title: str
+    background_url: str
+    background_path: Path | None
+    font_path: Path | None
+
+
+_LEGACY_ALIASES = {
+    "token": "discord.token",
+    "guild_id": "discord.guild_id",
+    "state_file": "discord.state_file",
+    "enable_members_intent": "discord.intents.members",
+    "enable_presences_intent": "discord.intents.presences",
+    "enable_message_content_intent": "discord.intents.message_content",
+    "audit_category_name": "audit.category_name",
+    "audit_category_id": "audit.category_id",
+    "ignored_channel_ids": "audit.ignored_channel_ids",
+    "nickname_prefix_rules": "nickname_prefix.rules",
+    "nickname_prefix_legacy_prefixes": "nickname_prefix.legacy_prefixes",
+    "nickname_prefix_excluded_user_ids": "nickname_prefix.excluded_user_ids",
+    "nickname_prefix_resync_minutes": "nickname_prefix.resync_minutes",
+    "protected_bans_enabled": "protection.bans.enabled",
+    "protected_bans_auto_capture": "protection.bans.auto_capture",
+    "protected_bans_enforce_minutes": "protection.bans.enforce_minutes",
+    "protected_voice_guard_enabled": "protection.voice_guard.enabled",
+    "protected_voice_guard_user_ids": "protection.voice_guard.user_ids",
+    "chat_banter_enabled": "chat_banter.enabled",
+    "chat_banter_reply_chance": "chat_banter.reply_chance",
+    "chat_banter_channel_cooldown_seconds": "chat_banter.channel_cooldown_seconds",
+    "chat_banter_user_cooldown_seconds": "chat_banter.user_cooldown_seconds",
+    "pubg_lookup_enabled": "pubg.enabled",
+    "pubg_lookup_channel_ids": "pubg.channel_ids",
+    "pubg_lookup_allowed_role_ids": "pubg.allowed_role_ids",
+    "pubg_api_key": "pubg.api_key",
+    "steam_api_key": "pubg.steam_api_key",
+    "pubg_platform": "pubg.platform",
+    "pubg_lookup_include_ranked": "pubg.include_ranked",
+    "pubg_lookup_include_lifetime_stats": "pubg.include_lifetime_stats",
+    "pubg_lookup_cache_ttl_seconds": "pubg.cache_ttl_seconds",
+    "pubg_lookup_user_cooldown_seconds": "pubg.user_cooldown_seconds",
+    "steam_digest_enabled": "steam.enabled",
+    "steam_digest_channel_ids": "steam.channel_ids",
+    "steam_digest_hour": "steam.hour",
+    "steam_digest_minute": "steam.minute",
+    "steam_digest_timezone": "steam.timezone",
+    "steam_digest_top_count": "steam.top_count",
+    "steam_digest_include_support_stats": "steam.include_support_stats",
+    "server_banner_enabled": "banner.enabled",
+    "server_banner_update_minutes": "banner.update_minutes",
+    "server_banner_title": "banner.title",
+    "server_banner_background_url": "banner.background_url",
+    "server_banner_background_path": "banner.background_path",
+    "server_banner_font_path": "banner.font_path",
+}
+
+
+@dataclass(slots=True)
+class BotConfig:
+    discord: DiscordConfig
+    audit: AuditConfig
+    nickname_prefix: NicknamePrefixConfig
+    protection: ProtectionConfig
+    chat_banter: ChatBanterConfig
+    pubg: PubgConfig
+    steam: SteamDigestConfig
+    banner: ServerBannerConfig
+
+    def __getattr__(self, name: str) -> Any:
+        path = _LEGACY_ALIASES.get(name)
+        if path is None:
+            raise AttributeError(f"{type(self).__name__!s} has no attribute {name!r}")
+        value: Any = self
+        for part in path.split("."):
+            value = getattr(value, part)
+        return value
 
 
 def _parse_bool_env(name: str, default: bool = False) -> bool:
@@ -172,91 +286,82 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
     audit_category_name = os.getenv("AUDIT_CATEGORY_NAME", "Аудит").strip() or "Аудит"
     state_file_raw = os.getenv("STATE_FILE", "data/audit_state.json").strip() or "data/audit_state.json"
     state_file = (root_dir / state_file_raw).resolve()
-    enable_members_intent = _parse_bool_env("ENABLE_MEMBERS_INTENT", default=False)
-    enable_presences_intent = _parse_bool_env("ENABLE_PRESENCES_INTENT", default=False)
-    enable_message_content_intent = _parse_bool_env("ENABLE_MESSAGE_CONTENT_INTENT", default=False)
-    nickname_prefix_rules = _parse_nickname_prefix_rules("NICK_PREFIX_RULES")
-    nickname_prefix_legacy_prefixes = _parse_string_set_env("NICK_PREFIX_LEGACY_PREFIXES")
-    nickname_prefix_excluded_user_ids = _parse_id_set_env("NICK_PREFIX_EXCLUDED_USER_IDS")
-    nickname_prefix_resync_minutes = max(0, _parse_int_env("NICK_PREFIX_RESYNC_MINUTES", default=180))
-    ignored_channel_ids = _parse_id_set_env("IGNORED_CHANNEL_IDS")
-    protected_bans_enabled = _parse_bool_env("PROTECTED_BANS_ENABLED", default=False)
-    protected_bans_auto_capture = _parse_bool_env("PROTECTED_BANS_AUTO_CAPTURE", default=True)
-    protected_bans_enforce_minutes = max(0, _parse_int_env("PROTECTED_BANS_ENFORCE_MINUTES", default=5))
-    protected_voice_guard_enabled = _parse_bool_env("PROTECTED_VOICE_GUARD_ENABLED", default=False)
-    protected_voice_guard_user_ids = _parse_id_set_env("PROTECTED_VOICE_GUARD_USER_IDS")
-    chat_banter_enabled = _parse_bool_env("CHAT_BANTER_ENABLED", default=True)
-    chat_banter_reply_chance = max(0.0, min(1.0, _parse_float_env("CHAT_BANTER_REPLY_CHANCE", default=0.35)))
-    chat_banter_channel_cooldown_seconds = max(0, _parse_int_env("CHAT_BANTER_CHANNEL_COOLDOWN_SECONDS", default=120))
-    chat_banter_user_cooldown_seconds = max(0, _parse_int_env("CHAT_BANTER_USER_COOLDOWN_SECONDS", default=300))
-    pubg_lookup_enabled = _parse_bool_env("PUBG_LOOKUP_ENABLED", default=False)
-    pubg_lookup_channel_ids = _parse_id_set_env("PUBG_LOOKUP_CHANNEL_IDS")
-    pubg_lookup_allowed_role_ids = _parse_id_set_env("PUBG_LOOKUP_ALLOWED_ROLE_IDS")
-    pubg_api_key = os.getenv("PUBG_API_KEY", "").strip()
-    steam_api_key = os.getenv("STEAM_API_KEY", "").strip()
-    pubg_platform = (os.getenv("PUBG_PLATFORM", "steam").strip().lower() or "steam")
-    pubg_lookup_include_ranked = _parse_bool_env("PUBG_LOOKUP_INCLUDE_RANKED", default=True)
-    pubg_lookup_include_lifetime_stats = _parse_bool_env("PUBG_LOOKUP_INCLUDE_LIFETIME_STATS", default=False)
-    pubg_lookup_cache_ttl_seconds = max(60, _parse_int_env("PUBG_LOOKUP_CACHE_TTL_SECONDS", default=900))
-    pubg_lookup_user_cooldown_seconds = max(0, _parse_int_env("PUBG_LOOKUP_USER_COOLDOWN_SECONDS", default=20))
-    steam_digest_enabled = _parse_bool_env("STEAM_DIGEST_ENABLED", default=False)
-    steam_digest_channel_ids = _parse_id_set_env("STEAM_DIGEST_CHANNEL_IDS")
-    steam_digest_hour = min(23, max(0, _parse_int_env("STEAM_DIGEST_HOUR", default=20)))
-    steam_digest_minute = min(59, max(0, _parse_int_env("STEAM_DIGEST_MINUTE", default=0)))
-    steam_digest_timezone = os.getenv("STEAM_DIGEST_TIMEZONE", "Europe/Simferopol").strip() or "Europe/Simferopol"
-    steam_digest_top_count = min(25, max(5, _parse_int_env("STEAM_DIGEST_TOP_COUNT", default=15)))
-    steam_digest_include_support_stats = _parse_bool_env("STEAM_DIGEST_INCLUDE_SUPPORT_STATS", default=True)
-    server_banner_enabled = _parse_bool_env("SERVER_BANNER_ENABLED", default=False)
-    server_banner_update_minutes = max(1, _parse_int_env("SERVER_BANNER_UPDATE_MINUTES", default=2))
-    server_banner_title = os.getenv("SERVER_BANNER_TITLE", "").strip()
-    server_banner_background_url = os.getenv("SERVER_BANNER_BACKGROUND_URL", "").strip()
-    server_banner_background_path = _parse_optional_path_env("SERVER_BANNER_BACKGROUND_PATH", root_dir)
-    server_banner_font_path = _parse_optional_path_env("SERVER_BANNER_FONT_PATH", root_dir)
 
-    return BotConfig(
+    discord_config = DiscordConfig(
         token=token,
         guild_id=guild_id,
-        audit_category_name=audit_category_name,
-        audit_category_id=audit_category_id,
         state_file=state_file,
-        enable_members_intent=enable_members_intent,
-        enable_presences_intent=enable_presences_intent,
-        enable_message_content_intent=enable_message_content_intent,
-        nickname_prefix_rules=nickname_prefix_rules,
-        nickname_prefix_legacy_prefixes=nickname_prefix_legacy_prefixes,
-        nickname_prefix_excluded_user_ids=nickname_prefix_excluded_user_ids,
-        nickname_prefix_resync_minutes=nickname_prefix_resync_minutes,
-        ignored_channel_ids=ignored_channel_ids,
-        protected_bans_enabled=protected_bans_enabled,
-        protected_bans_auto_capture=protected_bans_auto_capture,
-        protected_bans_enforce_minutes=protected_bans_enforce_minutes,
-        protected_voice_guard_enabled=protected_voice_guard_enabled,
-        protected_voice_guard_user_ids=protected_voice_guard_user_ids,
-        chat_banter_enabled=chat_banter_enabled,
-        chat_banter_reply_chance=chat_banter_reply_chance,
-        chat_banter_channel_cooldown_seconds=chat_banter_channel_cooldown_seconds,
-        chat_banter_user_cooldown_seconds=chat_banter_user_cooldown_seconds,
-        pubg_lookup_enabled=pubg_lookup_enabled,
-        pubg_lookup_channel_ids=pubg_lookup_channel_ids,
-        pubg_lookup_allowed_role_ids=pubg_lookup_allowed_role_ids,
-        pubg_api_key=pubg_api_key,
-        steam_api_key=steam_api_key,
-        pubg_platform=pubg_platform,
-        pubg_lookup_include_ranked=pubg_lookup_include_ranked,
-        pubg_lookup_include_lifetime_stats=pubg_lookup_include_lifetime_stats,
-        pubg_lookup_cache_ttl_seconds=pubg_lookup_cache_ttl_seconds,
-        pubg_lookup_user_cooldown_seconds=pubg_lookup_user_cooldown_seconds,
-        steam_digest_enabled=steam_digest_enabled,
-        steam_digest_channel_ids=steam_digest_channel_ids,
-        steam_digest_hour=steam_digest_hour,
-        steam_digest_minute=steam_digest_minute,
-        steam_digest_timezone=steam_digest_timezone,
-        steam_digest_top_count=steam_digest_top_count,
-        steam_digest_include_support_stats=steam_digest_include_support_stats,
-        server_banner_enabled=server_banner_enabled,
-        server_banner_update_minutes=server_banner_update_minutes,
-        server_banner_title=server_banner_title,
-        server_banner_background_url=server_banner_background_url,
-        server_banner_background_path=server_banner_background_path,
-        server_banner_font_path=server_banner_font_path,
+        intents=DiscordIntentsConfig(
+            members=_parse_bool_env("ENABLE_MEMBERS_INTENT", default=False),
+            presences=_parse_bool_env("ENABLE_PRESENCES_INTENT", default=False),
+            message_content=_parse_bool_env("ENABLE_MESSAGE_CONTENT_INTENT", default=False),
+        ),
+    )
+    audit_config = AuditConfig(
+        category_name=audit_category_name,
+        category_id=audit_category_id,
+        ignored_channel_ids=_parse_id_set_env("IGNORED_CHANNEL_IDS"),
+    )
+    nickname_prefix_config = NicknamePrefixConfig(
+        rules=_parse_nickname_prefix_rules("NICK_PREFIX_RULES"),
+        legacy_prefixes=_parse_string_set_env("NICK_PREFIX_LEGACY_PREFIXES"),
+        excluded_user_ids=_parse_id_set_env("NICK_PREFIX_EXCLUDED_USER_IDS"),
+        resync_minutes=max(0, _parse_int_env("NICK_PREFIX_RESYNC_MINUTES", default=180)),
+    )
+    protection_config = ProtectionConfig(
+        bans=ProtectedBanConfig(
+            enabled=_parse_bool_env("PROTECTED_BANS_ENABLED", default=False),
+            auto_capture=_parse_bool_env("PROTECTED_BANS_AUTO_CAPTURE", default=True),
+            enforce_minutes=max(0, _parse_int_env("PROTECTED_BANS_ENFORCE_MINUTES", default=5)),
+        ),
+        voice_guard=ProtectedVoiceGuardConfig(
+            enabled=_parse_bool_env("PROTECTED_VOICE_GUARD_ENABLED", default=False),
+            user_ids=_parse_id_set_env("PROTECTED_VOICE_GUARD_USER_IDS"),
+        ),
+    )
+    chat_banter_config = ChatBanterConfig(
+        enabled=_parse_bool_env("CHAT_BANTER_ENABLED", default=True),
+        reply_chance=max(0.0, min(1.0, _parse_float_env("CHAT_BANTER_REPLY_CHANCE", default=0.35))),
+        channel_cooldown_seconds=max(0, _parse_int_env("CHAT_BANTER_CHANNEL_COOLDOWN_SECONDS", default=120)),
+        user_cooldown_seconds=max(0, _parse_int_env("CHAT_BANTER_USER_COOLDOWN_SECONDS", default=300)),
+    )
+    pubg_config = PubgConfig(
+        enabled=_parse_bool_env("PUBG_LOOKUP_ENABLED", default=False),
+        channel_ids=_parse_id_set_env("PUBG_LOOKUP_CHANNEL_IDS"),
+        allowed_role_ids=_parse_id_set_env("PUBG_LOOKUP_ALLOWED_ROLE_IDS"),
+        api_key=os.getenv("PUBG_API_KEY", "").strip(),
+        steam_api_key=os.getenv("STEAM_API_KEY", "").strip(),
+        platform=(os.getenv("PUBG_PLATFORM", "steam").strip().lower() or "steam"),
+        include_ranked=_parse_bool_env("PUBG_LOOKUP_INCLUDE_RANKED", default=True),
+        include_lifetime_stats=_parse_bool_env("PUBG_LOOKUP_INCLUDE_LIFETIME_STATS", default=False),
+        cache_ttl_seconds=max(60, _parse_int_env("PUBG_LOOKUP_CACHE_TTL_SECONDS", default=900)),
+        user_cooldown_seconds=max(0, _parse_int_env("PUBG_LOOKUP_USER_COOLDOWN_SECONDS", default=20)),
+    )
+    steam_config = SteamDigestConfig(
+        enabled=_parse_bool_env("STEAM_DIGEST_ENABLED", default=False),
+        channel_ids=_parse_id_set_env("STEAM_DIGEST_CHANNEL_IDS"),
+        hour=min(23, max(0, _parse_int_env("STEAM_DIGEST_HOUR", default=20))),
+        minute=min(59, max(0, _parse_int_env("STEAM_DIGEST_MINUTE", default=0))),
+        timezone=os.getenv("STEAM_DIGEST_TIMEZONE", "Europe/Simferopol").strip() or "Europe/Simferopol",
+        top_count=min(25, max(5, _parse_int_env("STEAM_DIGEST_TOP_COUNT", default=15))),
+        include_support_stats=_parse_bool_env("STEAM_DIGEST_INCLUDE_SUPPORT_STATS", default=True),
+    )
+    banner_config = ServerBannerConfig(
+        enabled=_parse_bool_env("SERVER_BANNER_ENABLED", default=False),
+        update_minutes=max(1, _parse_int_env("SERVER_BANNER_UPDATE_MINUTES", default=2)),
+        title=os.getenv("SERVER_BANNER_TITLE", "").strip(),
+        background_url=os.getenv("SERVER_BANNER_BACKGROUND_URL", "").strip(),
+        background_path=_parse_optional_path_env("SERVER_BANNER_BACKGROUND_PATH", root_dir),
+        font_path=_parse_optional_path_env("SERVER_BANNER_FONT_PATH", root_dir),
+    )
+
+    return BotConfig(
+        discord=discord_config,
+        audit=audit_config,
+        nickname_prefix=nickname_prefix_config,
+        protection=protection_config,
+        chat_banter=chat_banter_config,
+        pubg=pubg_config,
+        steam=steam_config,
+        banner=banner_config,
     )

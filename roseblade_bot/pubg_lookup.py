@@ -171,28 +171,28 @@ class PubgLookupService:
 
     @property
     def is_enabled(self) -> bool:
-        return self.config.pubg_lookup_enabled
+        return self.config.pubg.enabled
 
     @property
     def is_configured(self) -> bool:
-        return self.is_enabled and bool(self.config.pubg_api_key) and bool(self.config.pubg_lookup_channel_ids)
+        return self.is_enabled and bool(self.config.pubg.api_key) and bool(self.config.pubg.channel_ids)
 
     def channel_count(self) -> int:
-        return len(self.config.pubg_lookup_channel_ids)
+        return len(self.config.pubg.channel_ids)
 
     def allowed_role_count(self) -> int:
-        return len(self.config.pubg_lookup_allowed_role_ids)
+        return len(self.config.pubg.allowed_role_ids)
 
     def has_steam_key(self) -> bool:
-        return bool(self.config.steam_api_key)
+        return bool(self.config.pubg.steam_api_key)
 
     def is_enabled_for_channel(self, channel_id: int) -> bool:
-        return self.is_enabled and channel_id in self.config.pubg_lookup_channel_ids
+        return self.is_enabled and channel_id in self.config.pubg.channel_ids
 
     def member_has_access(self, member: discord.Member) -> bool:
         if member.id == member.guild.owner_id:
             return True
-        allowed_role_ids = self.config.pubg_lookup_allowed_role_ids
+        allowed_role_ids = self.config.pubg.allowed_role_ids
         if not allowed_role_ids:
             return True
         return any(role.id in allowed_role_ids for role in member.roles if not role.is_default())
@@ -257,7 +257,7 @@ class PubgLookupService:
         return any(token.lower() not in _STOP_TOKENS for token in candidates)
 
     def is_user_on_cooldown(self, guild_id: int, user_id: int) -> int | None:
-        cooldown_seconds = self.config.pubg_lookup_user_cooldown_seconds
+        cooldown_seconds = self.config.pubg.user_cooldown_seconds
         if cooldown_seconds <= 0:
             return None
         stamp = self._user_cooldowns.get((guild_id, user_id))
@@ -332,7 +332,7 @@ class PubgLookupService:
         return await fetch_json(
             url,
             headers={
-                "Authorization": f"Bearer {self.config.pubg_api_key}",
+                "Authorization": f"Bearer {self.config.pubg.api_key}",
                 "Accept": "application/vnd.api+json",
                 "User-Agent": "EVA-Assistant/1.0",
             },
@@ -371,7 +371,7 @@ class PubgLookupService:
         ):
             return self._current_season_id
 
-        payload, headers = await self._request_json(f"https://api.pubg.com/shards/{self.config.pubg_platform}/seasons")
+        payload, headers = await self._request_json(f"https://api.pubg.com/shards/{self.config.pubg.platform}/seasons")
         self._remember_headers(headers)
         seasons = payload.get("data") or []
         current = next((season for season in seasons if season.get("attributes", {}).get("isCurrentSeason")), None)
@@ -471,18 +471,18 @@ class PubgLookupService:
             )
 
         cache_key = (
-            self.config.pubg_platform,
+            self.config.pubg.platform,
             self._normalize_nickname(nickname),
-            self.config.pubg_lookup_include_ranked,
-            self.config.pubg_lookup_include_lifetime_stats,
+            self.config.pubg.include_ranked,
+            self.config.pubg.include_lifetime_stats,
         )
         cached = self._cache.get(cache_key)
         now = discord.utils.utcnow()
-        if cached is not None and now - cached.cached_at <= timedelta(seconds=self.config.pubg_lookup_cache_ttl_seconds):
+        if cached is not None and now - cached.cached_at <= timedelta(seconds=self.config.pubg.cache_ttl_seconds):
             return cached.result
 
         player_url = (
-            f"https://api.pubg.com/shards/{self.config.pubg_platform}/players"
+            f"https://api.pubg.com/shards/{self.config.pubg.platform}/players"
             f"?filter[playerNames]={parse.quote(nickname)}"
         )
         try:
@@ -500,7 +500,7 @@ class PubgLookupService:
                     title=self._pick(_NOT_FOUND_TITLES),
                     description=(
                         f"По нику **{discord.utils.escape_markdown(nickname)}** ничего не нашла "
-                        f"на shard **{self.config.pubg_platform}**. Проверь раскладку и символы."
+                        f"на shard **{self.config.pubg.platform}**. Проверь раскладку и символы."
                     ),
                     color=discord.Colour.light_grey(),
                 )
@@ -567,20 +567,20 @@ class PubgLookupService:
         matches = player.get("relationships", {}).get("matches", {}).get("data", [])
         ranked_summary: PubgRankedSummary | None = None
         lifetime_summary: PubgLifetimeSummary | None = None
-        if self.config.pubg_lookup_include_ranked:
+        if self.config.pubg.include_ranked:
             try:
                 season_id = await self._resolve_current_season_id()
                 if season_id:
                     ranked_url = (
-                        f"https://api.pubg.com/shards/{self.config.pubg_platform}/players/{player['id']}/seasons/{season_id}/ranked"
+                        f"https://api.pubg.com/shards/{self.config.pubg.platform}/players/{player['id']}/seasons/{season_id}/ranked"
                     )
                     ranked_payload, ranked_headers = await self._request_json(ranked_url)
                     self._remember_headers(ranked_headers)
                     ranked_summary = self._extract_ranked_summary(ranked_payload)
             except Exception:
                 ranked_summary = None
-        if self.config.pubg_lookup_include_lifetime_stats:
-            lifetime_url = f"https://api.pubg.com/shards/{self.config.pubg_platform}/players/{player['id']}/seasons/lifetime"
+        if self.config.pubg.include_lifetime_stats:
+            lifetime_url = f"https://api.pubg.com/shards/{self.config.pubg.platform}/players/{player['id']}/seasons/lifetime"
             try:
                 lifetime_payload, lifetime_headers = await self._request_json(lifetime_url)
                 self._remember_headers(lifetime_headers)
@@ -591,7 +591,7 @@ class PubgLookupService:
         player_data = PubgPlayerLookup(
             name=str(attributes.get("name") or nickname),
             account_id=str(player.get("id") or ""),
-            shard_id=str(attributes.get("shardId") or self.config.pubg_platform),
+            shard_id=str(attributes.get("shardId") or self.config.pubg.platform),
             clan_id=str(attributes.get("clanId") or "").strip() or None,
             ban_type=str(attributes.get("banType") or "").strip() or None,
             recent_match_count=len(matches),
