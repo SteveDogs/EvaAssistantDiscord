@@ -17,6 +17,7 @@ import discord
 
 from roseblade_bot import APP_NAME, BRAND_SIGNATURE
 from roseblade_bot.config import BotConfig
+from roseblade_bot.services.http import fetch_bytes
 
 try:
     from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
@@ -202,13 +203,13 @@ class ServerBannerService:
             return data
 
         if self.config.server_banner_background_url:
-            timeout = aiohttp.ClientTimeout(total=15)
             headers = {"User-Agent": f"{APP_NAME} live banner / {BRAND_SIGNATURE}"}
             try:
-                async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
-                    async with session.get(self.config.server_banner_background_url) as response:
-                        response.raise_for_status()
-                        data = await response.read()
+                data, _ = await fetch_bytes(
+                    self.config.server_banner_background_url,
+                    headers=headers,
+                    timeout_total=15,
+                )
             except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):  # type: ignore[name-defined]
                 return self._background_cache_bytes
 

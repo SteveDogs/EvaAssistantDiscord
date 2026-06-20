@@ -19,6 +19,7 @@ import discord
 
 from roseblade_bot import EMBED_FOOTER
 from roseblade_bot.config import BotConfig
+from roseblade_bot.services.http import http_session
 
 
 STEAM_WEB_API_BASE = "https://api.steampowered.com"
@@ -232,12 +233,11 @@ class SteamDigestService:
         return current_minutes >= scheduled_minutes
 
     async def build_report(self) -> SteamDigestReport:
-        timeout = aiohttp.ClientTimeout(total=25)
         headers = {
             "User-Agent": "EVA Assistant / RoseBladeBot",
             "Accept-Language": "en-US,en;q=0.9",
         }
-        async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+        async with http_session(timeout_total=25, headers=headers) as session:
             steam_server_time, steam_api_latency_ms = await self._fetch_server_info(session)
             chart_rollup_date, ranked_candidates = await self._fetch_most_played_candidates(session)
             support = await self._fetch_support_snapshot(session) if self.config.steam_digest_include_support_stats else None

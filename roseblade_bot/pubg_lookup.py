@@ -8,20 +8,20 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-import gzip
-import json
 import random
 import re
 from typing import TYPE_CHECKING, Any
-from urllib import error, parse, request
+from urllib import parse
 
+import aiohttp
 import discord
 
 from roseblade_bot import EMBED_FOOTER
 from roseblade_bot.config import BotConfig
+from roseblade_bot.services.http import HttpRequestError, fetch_json
 
 if TYPE_CHECKING:
-    from roseblade_bot.bot import AuditCog
+    from roseblade_bot.cogs.shared import EvaSharedCog
 
 
 _ADDRESS_RE = re.compile(r"^\s*(ева|eva)\b", re.IGNORECASE)
@@ -328,22 +328,16 @@ class PubgLookupService:
             color=discord.Colour.dark_gold(),
         )
 
-    def _request_json(self, url: str) -> tuple[Any, Any]:
-        req = request.Request(
+    async def _request_json(self, url: str) -> tuple[Any, Any]:
+        return await fetch_json(
             url,
             headers={
                 "Authorization": f"Bearer {self.config.pubg_api_key}",
                 "Accept": "application/vnd.api+json",
-                "Accept-Encoding": "gzip",
                 "User-Agent": "EVA-Assistant/1.0",
             },
+            timeout_total=20,
         )
-        with request.urlopen(req, timeout=20) as response:
-            body = response.read()
-            if response.headers.get("Content-Encoding") == "gzip":
-                body = gzip.decompress(body)
-            payload = json.loads(body.decode("utf-8"))
-            return payload, response.headers
 
     def _extract_best_mode(self, payload: Any) -> PubgLifetimeSummary | None:
         game_mode_stats = payload.get("data", {}).get("attributes", {}).get("gameModeStats", {})
@@ -368,7 +362,7 @@ class PubgLookupService:
             time_survived=float(best_mode_payload.get("timeSurvived", 0) or 0),
         )
 
-    def _resolve_current_season_id(self) -> str | None:
+    async def _resolve_current_season_id(self) -> str | None:
         now = discord.utils.utcnow()
         if (
             self._current_season_id is not None
@@ -377,7 +371,7 @@ class PubgLookupService:
         ):
             return self._current_season_id
 
-        payload, headers = self._request_json(f"https://api.pubg.com/shards/{self.config.pubg_platform}/seasons")
+        payload, headers = await self._request_json(f"https://api.pubg.com/shards/{self.config.pubg_platform}/seasons")
         self._remember_headers(headers)
         seasons = payload.get("data") or []
         current = next((season for season in seasons if season.get("attributes", {}).get("isCurrentSeason")), None)
@@ -458,7 +452,7 @@ class PubgLookupService:
             return f"{tier_label} {discord.utils.escape_markdown(sub_tier)}"
         return tier_label
 
-    def _lookup_sync(self, nickname: str) -> PubgLookupResult:
+    async def _lookup_async(self, nickname: str) -> PubgLookupResult:
         locally_limited, retry_after = self._is_rate_limited_locally()
         if locally_limited:
             return PubgLookupResult(
@@ -492,11 +486,11 @@ class PubgLookupService:
             f"?filter[playerNames]={parse.quote(nickname)}"
         )
         try:
-            payload, headers = self._request_json(player_url)
+            payload, headers = await self._request_json(player_url)
             self._remember_headers(headers)
-        except error.HTTPError as exc:
+        except HttpRequestError as exc:
             self._remember_headers(exc.headers)
-            if exc.code == 404:
+            if exc.status == 404:
                 result = PubgLookupResult(
                     ok=False,
                     found=False,
@@ -512,7 +506,7 @@ class PubgLookupService:
                 )
                 self._cache[cache_key] = _CacheEntry(result=result, cached_at=now)
                 return result
-            if exc.code == 429:
+            if exc.status == 429:
                 locally_limited, retry_after = self._is_rate_limited_locally()
                 return PubgLookupResult(
                     ok=False,
@@ -535,10 +529,10 @@ class PubgLookupService:
                 needs_nickname=False,
                 nickname=nickname,
                 title=self._pick(_ERROR_TITLES),
-                description=f"PUBG API вернул ошибку **{exc.code}**. Чуть позже попробуем ещё раз.",
+                description=f"PUBG API вернул ошибку **{exc.status}**. Чуть позже попробуем ещё раз.",
                 color=discord.Colour.red(),
             )
-        except (TimeoutError, OSError, json.JSONDecodeError):
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError, ValueError):
             return PubgLookupResult(
                 ok=False,
                 found=False,
@@ -575,12 +569,12 @@ class PubgLookupService:
         lifetime_summary: PubgLifetimeSummary | None = None
         if self.config.pubg_lookup_include_ranked:
             try:
-                season_id = self._resolve_current_season_id()
+                season_id = await self._resolve_current_season_id()
                 if season_id:
                     ranked_url = (
                         f"https://api.pubg.com/shards/{self.config.pubg_platform}/players/{player['id']}/seasons/{season_id}/ranked"
                     )
-                    ranked_payload, ranked_headers = self._request_json(ranked_url)
+                    ranked_payload, ranked_headers = await self._request_json(ranked_url)
                     self._remember_headers(ranked_headers)
                     ranked_summary = self._extract_ranked_summary(ranked_payload)
             except Exception:
@@ -588,7 +582,7 @@ class PubgLookupService:
         if self.config.pubg_lookup_include_lifetime_stats:
             lifetime_url = f"https://api.pubg.com/shards/{self.config.pubg_platform}/players/{player['id']}/seasons/lifetime"
             try:
-                lifetime_payload, lifetime_headers = self._request_json(lifetime_url)
+                lifetime_payload, lifetime_headers = await self._request_json(lifetime_url)
                 self._remember_headers(lifetime_headers)
                 lifetime_summary = self._extract_best_mode(lifetime_payload)
             except Exception:
@@ -625,7 +619,7 @@ class PubgLookupService:
         return result
 
     async def lookup(self, nickname: str) -> PubgLookupResult:
-        return await asyncio.to_thread(self._lookup_sync, nickname)
+        return await self._lookup_async(nickname)
 
     def render_embed(self, result: PubgLookupResult) -> discord.Embed:
         embed = discord.Embed(title=result.title, description=result.description, color=result.color)
@@ -691,7 +685,7 @@ class PubgLookupService:
         embed.set_footer(text=f"{EMBED_FOOTER} • PUBG lookup")
         return embed
 
-    async def maybe_handle_message(self, cog: AuditCog, message: discord.Message) -> bool:
+    async def maybe_handle_message(self, cog: EvaSharedCog, message: discord.Message) -> bool:
         nickname = self.parse_message(message)
         if nickname is None:
             if message.guild is None or message.author.bot or not isinstance(message.channel, (discord.TextChannel, discord.Thread)):
