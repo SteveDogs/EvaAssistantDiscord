@@ -4,6 +4,7 @@
 ![discord.py](https://img.shields.io/badge/discord.py-2.7%2B-5865F2?style=flat-square&logo=discord&logoColor=white)
 ![Статус](https://img.shields.io/badge/статус-активная%20разработка-111111?style=flat-square)
 ![Бренд](https://img.shields.io/badge/Steve%20Dogs-Studio-E84A5F?style=flat-square)
+![Лицензия](https://img.shields.io/badge/license-Apache%202.0%20%2B%20NOTICE-2A9D8F?style=flat-square)
 
 **EVA Assistant** — это Discord-бот для аудит-логов и модерации, созданный для серверов, которым нужны не сухие технические простыни, а аккуратные, читаемые и красиво оформленные логи.
 
@@ -604,25 +605,69 @@ PROTECTED_BANS_ENFORCE_MINUTES=5
 ## Структура проекта
 
 ```text
+.editorconfig
+.env.example
+.gitattributes
+.gitignore
+LICENSE
+NOTICE.md
 main.py
+deploy/
+  lavalink/
+    application.yml.example
+    eva-lavalink.service.example
 roseblade_bot/
   __init__.py
+  assets/
+    background.png
+    microphone.png
+    user.png
+  audit/
+    constants.py
+    dispatcher.py
+    history.py
+    models.py
+    renderer.py
+  audit_cog_commands.py
+  audit_cog_events.py
+  audit_cog_runtime.py
   audit_definitions.py
   audit_logger.py
   audit_snapshots.py
   bot.py
   chat_banter.py
+  cogs/
+    commands.py
+    core.py
+    events.py
+    music.py
+    shared.py
   config.py
   formatters.py
   locales/
+    chat_banter.toml
     ru.toml
   message_handlers.py
+  music/
+    lavalink_config.py
+    phrases.py
+    service.py
   phrases.py
   pubg_lookup.py
+  server_banner.py
+  services/
+    http.py
+  special_dm.py
+  steam_digest.py
   storage.py
   voice_guard.py
   voice_handlers.py
-.env.example
+tests/
+  test_chat_banter.py
+  test_config.py
+  test_music_lavalink_config.py
+  test_music_service.py
+  test_special_dm.py
 requirements.txt
 ```
 
@@ -647,4 +692,17 @@ requirements.txt
 Copyright (c) 2026 Steve Dogs Studio.
 
 В этом репозитории размещены исходный код, брендированные материалы и публичная витрина проекта EVA Assistant.
-Если отдельный `LICENSE` не добавлен, все права по умолчанию остаются у автора.
+
+## Лицензия
+
+Репозиторий распространяется по лицензии **Apache License 2.0**.
+
+Это значит:
+
+- код можно использовать, форкать, дорабатывать, разворачивать и публиковать, включая коммерческое использование
+- при распространении и публичном переиспользовании нужно сохранять `LICENSE` и `NOTICE.md`
+- `NOTICE.md` закрепляет атрибуцию **Steve Dogs Studio** и ссылку на [steve.dog](https://steve.dog)
+- изменённые файлы и неофициальные сборки должны явно обозначаться как изменённые
+- название, логотипы и фирменный стиль EVA Assistant не передаются как товарные знаки автоматически
+
+Полные условия лежат в файле [LICENSE](LICENSE) и дополняются [NOTICE.md](NOTICE.md).
