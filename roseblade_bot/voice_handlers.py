@@ -214,6 +214,7 @@ async def handle_on_voice_state_update(
                 related_channels=[after.channel],
                 related_users=[member],
             )
+            await cog.maybe_send_special_voice_join_dm(member, after.channel)
             return
 
         if before.channel is not None and after.channel is not None:

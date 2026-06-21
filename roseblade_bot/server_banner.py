@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import hashlib
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -76,6 +77,7 @@ class ServerBannerRenderResult:
     image_bytes: bytes
     stats: ServerBannerStats
     signature: str
+    background_fingerprint: str
 
 
 class ServerBannerService:
@@ -133,9 +135,11 @@ class ServerBannerService:
                 if getattr(member, "status", discord.Status.offline) is not discord.Status.offline
             )
 
+        excluded_channel_ids = self.config.banner.excluded_channel_ids
         connected_ids = {
             member.id
             for channel in [*guild.voice_channels, *guild.stage_channels]
+            if channel.id not in excluded_channel_ids
             for member in channel.members
         }
         title = (self.config.banner.title.strip() or guild.name).strip().upper()
@@ -149,7 +153,7 @@ class ServerBannerService:
             rendered_at=datetime.now(timezone.utc),
         )
 
-    def signature(self, stats: ServerBannerStats) -> str:
+    def signature(self, stats: ServerBannerStats, *, background_fingerprint: str) -> str:
         return "|".join(
             [
                 stats.title,
@@ -158,6 +162,7 @@ class ServerBannerService:
                 str(stats.voice_count),
                 str(stats.boost_level),
                 str(stats.boost_count),
+                background_fingerprint,
             ]
         )
 
@@ -167,7 +172,7 @@ class ServerBannerService:
             raise RuntimeError(dependency_error)
 
         stats = await self.collect_stats(guild)
-        background = await self._load_background_image()
+        background, background_fingerprint = await self._load_background_image()
         image = self._compose_banner(background, stats)
         buffer = BytesIO()
         image.save(buffer, format="PNG", optimize=True)
@@ -175,16 +180,17 @@ class ServerBannerService:
         return ServerBannerRenderResult(
             image_bytes=image_bytes,
             stats=stats,
-            signature=self.signature(stats),
+            signature=self.signature(stats, background_fingerprint=background_fingerprint),
+            background_fingerprint=background_fingerprint,
         )
 
-    async def _load_background_image(self) -> Any:
+    async def _load_background_image(self) -> tuple[Any, str]:
         background_data = await self._background_bytes()
         if background_data is not None:
             opened = self._open_image(background_data)
             if opened is not None:
-                return opened
-        return self._build_fallback_background()
+                return (opened, self._background_fingerprint(background_data))
+        return (self._build_fallback_background(), "fallback-generated")
 
     async def _background_bytes(self) -> bytes | None:
         now = datetime.now(timezone.utc)
@@ -223,6 +229,10 @@ class ServerBannerService:
         cache_minutes = max(15, self.config.banner.update_minutes * 3)
         self._background_cache_bytes = data
         self._background_cache_expires_at = now + timedelta(minutes=cache_minutes)
+
+    @staticmethod
+    def _background_fingerprint(data: bytes) -> str:
+        return f"sha1:{hashlib.sha1(data).hexdigest()[:16]}"
 
     def _open_image(self, data: bytes) -> Any | None:
         if Image is None:
