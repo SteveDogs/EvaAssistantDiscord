@@ -1,0 +1,14 @@
+[Unit]
+Description=EVA Assistant Lavalink
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/RoseBladeBot/lavalink
+ExecStart=/usr/bin/java -jar /root/RoseBladeBot/lavalink/Lavalink.jar
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

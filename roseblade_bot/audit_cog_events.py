@@ -852,6 +852,8 @@ class AuditCogEventsMixin:
 
         guild = after.guild
         skip_nickname_log = self._was_recent_managed_nickname_update(after)
+        before_guild_avatar = getattr(before, "guild_avatar", None)
+        after_guild_avatar = getattr(after, "guild_avatar", None)
 
         if before.nick != after.nick and not skip_nickname_log:
             entry = await self.audit.fetch_recent_audit_entry(
@@ -970,8 +972,19 @@ class AuditCogEventsMixin:
                 related_users=[after],
             )
 
+        if before_guild_avatar != after_guild_avatar:
+            await self.maybe_send_special_avatar_changed_dm(after)
+
         if before.nick != after.nick or before.roles != after.roles:
             self.queue_member_nickname_sync(after)
+
+    @commands.Cog.listener()
+    async def on_user_update(self, before: discord.User, after: discord.User) -> None:
+        if after.bot:
+            return
+
+        if before.avatar != after.avatar:
+            await self.maybe_send_special_avatar_changed_dm(after)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:

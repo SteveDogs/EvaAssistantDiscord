@@ -85,6 +85,15 @@ class ChatBanterConfig:
 
 
 @dataclass(slots=True)
+class SpecialDmConfig:
+    enabled: bool
+    user_ids: frozenset[int]
+    events: frozenset[str]
+    voice_join_cooldown_seconds: int
+    avatar_change_cooldown_seconds: int
+
+
+@dataclass(slots=True)
 class PubgConfig:
     enabled: bool
     channel_ids: frozenset[int]
@@ -117,6 +126,23 @@ class ServerBannerConfig:
     background_url: str
     background_path: Path | None
     font_path: Path | None
+    excluded_channel_ids: frozenset[int]
+
+
+@dataclass(slots=True)
+class MusicConfig:
+    enabled: bool
+    lavalink_uri: str
+    lavalink_password: str
+    node_identifier: str
+    default_volume: int
+    inactive_timeout_seconds: int
+    default_search_source: str
+    fallback_search_source: str
+    allowed_role_ids: frozenset[int]
+    spotify_client_id: str
+    spotify_client_secret: str
+    spotify_country_code: str
 
 
 _LEGACY_ALIASES = {
@@ -142,6 +168,11 @@ _LEGACY_ALIASES = {
     "chat_banter_reply_chance": "chat_banter.reply_chance",
     "chat_banter_channel_cooldown_seconds": "chat_banter.channel_cooldown_seconds",
     "chat_banter_user_cooldown_seconds": "chat_banter.user_cooldown_seconds",
+    "special_dm_enabled": "special_dm.enabled",
+    "special_dm_user_ids": "special_dm.user_ids",
+    "special_dm_events": "special_dm.events",
+    "special_dm_voice_join_cooldown_seconds": "special_dm.voice_join_cooldown_seconds",
+    "special_dm_avatar_change_cooldown_seconds": "special_dm.avatar_change_cooldown_seconds",
     "pubg_lookup_enabled": "pubg.enabled",
     "pubg_lookup_channel_ids": "pubg.channel_ids",
     "pubg_lookup_allowed_role_ids": "pubg.allowed_role_ids",
@@ -165,6 +196,19 @@ _LEGACY_ALIASES = {
     "server_banner_background_url": "banner.background_url",
     "server_banner_background_path": "banner.background_path",
     "server_banner_font_path": "banner.font_path",
+    "server_banner_excluded_channel_ids": "banner.excluded_channel_ids",
+    "music_enabled": "music.enabled",
+    "music_lavalink_uri": "music.lavalink_uri",
+    "music_lavalink_password": "music.lavalink_password",
+    "music_node_identifier": "music.node_identifier",
+    "music_default_volume": "music.default_volume",
+    "music_inactive_timeout_seconds": "music.inactive_timeout_seconds",
+    "music_search_source": "music.default_search_source",
+    "music_fallback_search_source": "music.fallback_search_source",
+    "music_allowed_role_ids": "music.allowed_role_ids",
+    "music_spotify_client_id": "music.spotify_client_id",
+    "music_spotify_client_secret": "music.spotify_client_secret",
+    "music_spotify_country_code": "music.spotify_country_code",
 }
 
 
@@ -175,9 +219,11 @@ class BotConfig:
     nickname_prefix: NicknamePrefixConfig
     protection: ProtectionConfig
     chat_banter: ChatBanterConfig
+    special_dm: SpecialDmConfig
     pubg: PubgConfig
     steam: SteamDigestConfig
     banner: ServerBannerConfig
+    music: MusicConfig
 
     def __getattr__(self, name: str) -> Any:
         path = _LEGACY_ALIASES.get(name)
@@ -270,6 +316,19 @@ def _parse_string_set_env(name: str) -> frozenset[str]:
     return frozenset(values)
 
 
+def _parse_event_names_env(name: str, *, default: tuple[str, ...]) -> frozenset[str]:
+    raw_value = os.getenv(name, "").strip()
+    if not raw_value:
+        return frozenset(default)
+
+    values: set[str] = set()
+    for chunk in re.split(r"[;,\s]+", raw_value):
+        entry = chunk.strip().lower()
+        if entry:
+            values.add(entry)
+    return frozenset(values)
+
+
 def load_config(base_dir: Path | None = None) -> BotConfig:
     root_dir = base_dir or Path.cwd()
     _load_dotenv(root_dir / ".env")
@@ -325,6 +384,16 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
         channel_cooldown_seconds=max(0, _parse_int_env("CHAT_BANTER_CHANNEL_COOLDOWN_SECONDS", default=120)),
         user_cooldown_seconds=max(0, _parse_int_env("CHAT_BANTER_USER_COOLDOWN_SECONDS", default=300)),
     )
+    special_dm_config = SpecialDmConfig(
+        enabled=_parse_bool_env("SPECIAL_DM_ENABLED", default=False),
+        user_ids=_parse_id_set_env("SPECIAL_DM_USER_IDS"),
+        events=_parse_event_names_env(
+            "SPECIAL_DM_EVENTS",
+            default=("voice_joined", "avatar_changed"),
+        ),
+        voice_join_cooldown_seconds=max(0, _parse_int_env("SPECIAL_DM_VOICE_JOIN_COOLDOWN_SECONDS", default=600)),
+        avatar_change_cooldown_seconds=max(0, _parse_int_env("SPECIAL_DM_AVATAR_CHANGE_COOLDOWN_SECONDS", default=300)),
+    )
     pubg_config = PubgConfig(
         enabled=_parse_bool_env("PUBG_LOOKUP_ENABLED", default=False),
         channel_ids=_parse_id_set_env("PUBG_LOOKUP_CHANNEL_IDS"),
@@ -353,6 +422,21 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
         background_url=os.getenv("SERVER_BANNER_BACKGROUND_URL", "").strip(),
         background_path=_parse_optional_path_env("SERVER_BANNER_BACKGROUND_PATH", root_dir),
         font_path=_parse_optional_path_env("SERVER_BANNER_FONT_PATH", root_dir),
+        excluded_channel_ids=_parse_id_set_env("SERVER_BANNER_EXCLUDED_CHANNEL_IDS"),
+    )
+    music_config = MusicConfig(
+        enabled=_parse_bool_env("MUSIC_ENABLED", default=False),
+        lavalink_uri=os.getenv("MUSIC_LAVALINK_URI", "http://127.0.0.1:2333").strip() or "http://127.0.0.1:2333",
+        lavalink_password=os.getenv("MUSIC_LAVALINK_PASSWORD", "youshallnotpass").strip() or "youshallnotpass",
+        node_identifier=os.getenv("MUSIC_NODE_IDENTIFIER", "eva-node").strip() or "eva-node",
+        default_volume=min(150, max(1, _parse_int_env("MUSIC_DEFAULT_VOLUME", default=70))),
+        inactive_timeout_seconds=max(30, _parse_int_env("MUSIC_INACTIVE_TIMEOUT_SECONDS", default=180)),
+        default_search_source=os.getenv("MUSIC_SEARCH_SOURCE", "ytmsearch").strip() or "ytmsearch",
+        fallback_search_source=os.getenv("MUSIC_FALLBACK_SEARCH_SOURCE", "ytsearch").strip() or "ytsearch",
+        allowed_role_ids=_parse_id_set_env("MUSIC_ALLOWED_ROLE_IDS"),
+        spotify_client_id=os.getenv("MUSIC_SPOTIFY_CLIENT_ID", "").strip(),
+        spotify_client_secret=os.getenv("MUSIC_SPOTIFY_CLIENT_SECRET", "").strip(),
+        spotify_country_code=os.getenv("MUSIC_SPOTIFY_COUNTRY_CODE", "US").strip() or "US",
     )
 
     return BotConfig(
@@ -361,7 +445,9 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
         nickname_prefix=nickname_prefix_config,
         protection=protection_config,
         chat_banter=chat_banter_config,
+        special_dm=special_dm_config,
         pubg=pubg_config,
         steam=steam_config,
         banner=banner_config,
+        music=music_config,
     )

@@ -19,10 +19,79 @@ from roseblade_bot import APP_NAME, APP_CODENAME
 from roseblade_bot.chat_banter import CHAT_BANTER
 from roseblade_bot.formatters import _display_name, _format_duration
 from roseblade_bot.server_banner import ServerBannerRenderResult
+from roseblade_bot.special_dm import SPECIAL_DM
 from roseblade_bot.voice_guard import VOICE_GUARD
 
 
 class AuditCogRuntimeMixin:
+    def is_special_dm_target(self, user_id: int) -> bool:
+        return self.config.special_dm.enabled and user_id in self.config.special_dm.user_ids
+
+    def is_special_dm_event_enabled(self, event_name: str) -> bool:
+        return event_name in self.config.special_dm.events
+
+    def _special_dm_cooldown_seconds(self, event_name: str) -> int:
+        if event_name == "voice_joined":
+            return self.config.special_dm.voice_join_cooldown_seconds
+        if event_name == "avatar_changed":
+            return self.config.special_dm.avatar_change_cooldown_seconds
+        return 0
+
+    async def maybe_send_special_dm(
+        self,
+        user: discord.abc.User,
+        *,
+        event_name: str,
+        message: str,
+    ) -> bool:
+        if user.bot or not self.is_special_dm_target(user.id) or not self.is_special_dm_event_enabled(event_name):
+            return False
+
+        now = discord.utils.utcnow()
+        key = (user.id, event_name)
+        cooldown_seconds = self._special_dm_cooldown_seconds(event_name)
+        stamp = self._special_dm_last_sent_at.get(key)
+        if cooldown_seconds > 0 and stamp is not None and now - stamp <= timedelta(seconds=cooldown_seconds):
+            return False
+
+        try:
+            await user.send(message)
+        except (discord.Forbidden, discord.HTTPException, AttributeError):
+            return False
+
+        self._special_dm_last_sent_at[key] = now
+        return True
+
+    async def maybe_send_special_voice_join_dm(
+        self,
+        member: discord.Member,
+        channel: discord.VoiceChannel | discord.StageChannel,
+    ) -> bool:
+        return await self.maybe_send_special_dm(
+            member,
+            event_name="voice_joined",
+            message=SPECIAL_DM.render_voice_join(channel_name=channel.name),
+        )
+
+    async def maybe_send_special_avatar_changed_dm(self, user: discord.abc.User) -> bool:
+        return await self.maybe_send_special_dm(
+            user,
+            event_name="avatar_changed",
+            message=SPECIAL_DM.render_avatar_changed(),
+        )
+
+    def _ensure_runtime_workers(self) -> None:
+        if self.steam_digest.is_configured and not self.steam_digest_scheduler.is_running():
+            self.steam_digest_scheduler.start()
+        if self.server_banner.is_enabled and not self.server_banner_scheduler.is_running():
+            self.server_banner_scheduler.start()
+        if self.config.enable_members_intent and self.config.nickname_prefix_rules and not self.nickname_sync_worker.is_running():
+            self.nickname_sync_worker.start()
+        if self.config.enable_members_intent and self.config.nickname_prefix_rules and not self.nickname_resync_scheduler.is_running():
+            self.nickname_resync_scheduler.start()
+        if self.config.protected_bans_enabled and not self.protected_ban_enforcer.is_running():
+            self.protected_ban_enforcer.start()
+
     @staticmethod
     def _session_key(member: discord.Member) -> tuple[int, int]:
         return (member.guild.id, member.id)
@@ -289,16 +358,7 @@ class AuditCogRuntimeMixin:
 
     async def cog_load(self) -> None:
         self.bot.tree.on_error = self.on_app_command_error
-        if self.steam_digest.is_configured and not self.steam_digest_scheduler.is_running():
-            self.steam_digest_scheduler.start()
-        if self.server_banner.is_enabled and not self.server_banner_scheduler.is_running():
-            self.server_banner_scheduler.start()
-        if self.config.enable_members_intent and self.config.nickname_prefix_rules and not self.nickname_sync_worker.is_running():
-            self.nickname_sync_worker.start()
-        if self.config.enable_members_intent and self.config.nickname_prefix_rules and not self.nickname_resync_scheduler.is_running():
-            self.nickname_resync_scheduler.start()
-        if self.config.protected_bans_enabled and not self.protected_ban_enforcer.is_running():
-            self.protected_ban_enforcer.start()
+        self._ensure_runtime_workers()
 
     def cog_unload(self) -> None:
         if self.steam_digest_scheduler.is_running():
@@ -330,6 +390,7 @@ class AuditCogRuntimeMixin:
 
     @commands.Cog.listener()
     async def on_ready(self) -> None:
+        self._ensure_runtime_workers()
         print(f"{APP_NAME} ({APP_CODENAME}) connected as {self.bot.user} ({self.bot.user.id})")
         if self.config.guild_id:
             guild = self.bot.get_guild(self.config.guild_id)
@@ -550,6 +611,10 @@ class AuditCogRuntimeMixin:
             state["last_status"] = "skipped_same_stats"
             state["last_source"] = source
             state["last_error"] = None
+            state["last_member_count"] = prepared.stats.member_count
+            state["last_voice_count"] = prepared.stats.voice_count
+            state["last_boost_count"] = prepared.stats.boost_count
+            state["last_background_fingerprint"] = prepared.background_fingerprint
             self.store.set_service_state(guild.id, "server_banner", state)
             return ("skipped_same_stats", prepared)
 
@@ -572,7 +637,11 @@ class AuditCogRuntimeMixin:
         state["last_source"] = source
         state["last_signature"] = prepared.signature
         state["last_error"] = None
+        state["last_member_count"] = prepared.stats.member_count
         state["last_online_count"] = prepared.stats.online_count
+        state["last_voice_count"] = prepared.stats.voice_count
+        state["last_boost_count"] = prepared.stats.boost_count
+        state["last_background_fingerprint"] = prepared.background_fingerprint
         self.store.set_service_state(guild.id, "server_banner", state)
         return ("updated", prepared)
 

@@ -9,7 +9,8 @@ authors = [
 ]
 dependencies = [
   "discord.py>=2.7,<3.0",
-  "Pillow>=10,<12"
+  "Pillow>=10,<12",
+  "wavelink>=3.5,<4"
 ]
 
 [build-system]

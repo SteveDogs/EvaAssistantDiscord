@@ -10,7 +10,8 @@ from discord.ext import commands
 
 from roseblade_bot.audit_logger import AuditLogger
 from roseblade_bot.config import BotConfig, load_config
-from roseblade_bot.cogs import EvaCommandsCog, EvaCoreCog, EvaEventsCog, EvaSharedState
+from roseblade_bot.cogs import EvaCommandsCog, EvaCoreCog, EvaEventsCog, EvaMusicCog, EvaSharedState
+from roseblade_bot.music import MusicService
 from roseblade_bot.pubg_lookup import PubgLookupService
 from roseblade_bot.server_banner import ServerBannerService
 from roseblade_bot.steam_digest import SteamDigestService
@@ -34,6 +35,7 @@ def build_bot(config: BotConfig) -> commands.Bot:
         pubg_lookup=PubgLookupService(config),
         steam_digest=SteamDigestService(config),
         server_banner=ServerBannerService(config),
+        music=MusicService(config.music),
         audit=AuditLogger(
             store=store,
             default_category_name=config.audit.category_name,
@@ -46,6 +48,7 @@ def build_bot(config: BotConfig) -> commands.Bot:
         await bot.add_cog(EvaCoreCog(shared))
         await bot.add_cog(EvaCommandsCog(shared))
         await bot.add_cog(EvaEventsCog(shared))
+        await bot.add_cog(EvaMusicCog(shared))
         if config.discord.guild_id:
             guild = discord.Object(id=config.discord.guild_id)
             bot.tree.copy_global_to(guild=guild)
