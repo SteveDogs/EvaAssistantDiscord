@@ -62,7 +62,11 @@ class AuditCogCommandsMixin:
             f" presences={_bool_label(self.config.discord.intents.presences)},"
             f" message_content={_bool_label(self.config.discord.intents.message_content)}"
         )
-        lines.append(f"Префиксы ников: `{len(self.config.nickname_prefix.rules)}`")
+        lines.append(
+            "Префиксы ников:"
+            f" roles=`{len(self.config.nickname_prefix.rules)}`,"
+            f" users=`{len(self.config.nickname_prefix.user_rules)}`"
+        )
         lines.append(
             "Nick sync:"
             f" legacy={len(self.config.nickname_prefix.legacy_prefixes)},"

@@ -44,6 +44,7 @@ def _build_config() -> BotConfig:
         audit=AuditConfig(category_name="Аудит", category_id=None, ignored_channel_ids=frozenset()),
         nickname_prefix=NicknamePrefixConfig(
             rules={},
+            user_rules={},
             legacy_prefixes=frozenset(),
             excluded_user_ids=frozenset(),
             resync_minutes=180,

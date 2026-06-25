@@ -52,6 +52,7 @@ class AuditConfig:
 @dataclass(slots=True)
 class NicknamePrefixConfig:
     rules: dict[int, str]
+    user_rules: dict[int, str]
     legacy_prefixes: frozenset[str]
     excluded_user_ids: frozenset[int]
     resync_minutes: int
@@ -180,6 +181,7 @@ _LEGACY_ALIASES = {
     "audit_category_id": "audit.category_id",
     "ignored_channel_ids": "audit.ignored_channel_ids",
     "nickname_prefix_rules": "nickname_prefix.rules",
+    "nickname_prefix_user_rules": "nickname_prefix.user_rules",
     "nickname_prefix_legacy_prefixes": "nickname_prefix.legacy_prefixes",
     "nickname_prefix_excluded_user_ids": "nickname_prefix.excluded_user_ids",
     "nickname_prefix_resync_minutes": "nickname_prefix.resync_minutes",
@@ -405,6 +407,7 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
     )
     nickname_prefix_config = NicknamePrefixConfig(
         rules=_parse_nickname_prefix_rules("NICK_PREFIX_RULES"),
+        user_rules=_parse_nickname_prefix_rules("NICK_PREFIX_USER_RULES"),
         legacy_prefixes=_parse_string_set_env("NICK_PREFIX_LEGACY_PREFIXES"),
         excluded_user_ids=_parse_id_set_env("NICK_PREFIX_EXCLUDED_USER_IDS"),
         resync_minutes=max(0, _parse_int_env("NICK_PREFIX_RESYNC_MINUTES", default=180)),

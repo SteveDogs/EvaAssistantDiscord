@@ -91,9 +91,13 @@ class AuditCogRuntimeMixin:
             self.air_alert_scheduler.start()
         if self.war_monitor.is_configured and not self.war_monitor_scheduler.is_running():
             self.war_monitor_scheduler.start()
-        if self.config.enable_members_intent and self.config.nickname_prefix_rules and not self.nickname_sync_worker.is_running():
+        if self.config.enable_members_intent and (
+            self.config.nickname_prefix_rules or self.config.nickname_prefix.user_rules
+        ) and not self.nickname_sync_worker.is_running():
             self.nickname_sync_worker.start()
-        if self.config.enable_members_intent and self.config.nickname_prefix_rules and not self.nickname_resync_scheduler.is_running():
+        if self.config.enable_members_intent and (
+            self.config.nickname_prefix_rules or self.config.nickname_prefix.user_rules
+        ) and not self.nickname_resync_scheduler.is_running():
             self.nickname_resync_scheduler.start()
         if self.config.protected_bans_enabled and not self.protected_ban_enforcer.is_running():
             self.protected_ban_enforcer.start()
@@ -150,9 +154,21 @@ class AuditCogRuntimeMixin:
             f"{role_id}={self._normalize_prefix_token(prefix)}"
             for role_id, prefix in sorted(self.config.nickname_prefix_rules.items())
         ]
+        user_chunks = [
+            f"{user_id}={self._normalize_prefix_token(prefix)}"
+            for user_id, prefix in sorted(self.config.nickname_prefix.user_rules.items())
+        ]
         legacy_chunks = [self._normalize_prefix_token(prefix) for prefix in sorted(self.config.nickname_prefix_legacy_prefixes)]
         excluded_chunks = [str(user_id) for user_id in sorted(self.config.nickname_prefix_excluded_user_ids)]
-        return "|".join(role_chunks) + "::" + "|".join(legacy_chunks) + "::" + "|".join(excluded_chunks)
+        return (
+            "|".join(role_chunks)
+            + "::"
+            + "|".join(user_chunks)
+            + "::"
+            + "|".join(legacy_chunks)
+            + "::"
+            + "|".join(excluded_chunks)
+        )
 
     def _nickname_prefix_state(self, guild_id: int) -> dict[str, Any]:
         return self.store.get_service_state(guild_id, "nickname_prefix")
@@ -161,6 +177,7 @@ class AuditCogRuntimeMixin:
         state = self._nickname_prefix_state(guild_id)
         known_prefixes = {str(value).strip() for value in state.get("known_prefixes", []) if str(value).strip()}
         known_prefixes.update(prefix.strip() for prefix in self.config.nickname_prefix_rules.values() if prefix.strip())
+        known_prefixes.update(prefix.strip() for prefix in self.config.nickname_prefix.user_rules.values() if prefix.strip())
         known_prefixes.update(prefix.strip() for prefix in self.config.nickname_prefix_legacy_prefixes if prefix.strip())
         updated = sorted(known_prefixes)
         if updated != state.get("known_prefixes", []):
@@ -189,6 +206,9 @@ class AuditCogRuntimeMixin:
         return True
 
     def _configured_prefix(self, member: discord.Member) -> str | None:
+        user_prefix = self.config.nickname_prefix.user_rules.get(member.id)
+        if user_prefix:
+            return user_prefix
         configured_roles = [
             role
             for role in member.roles
@@ -241,6 +261,8 @@ class AuditCogRuntimeMixin:
     def _member_should_participate_in_nickname_sync(self, member: discord.Member) -> bool:
         if member.bot or member.id in self.config.nickname_prefix_excluded_user_ids:
             return False
+        if member.id in self.config.nickname_prefix.user_rules:
+            return True
         if any(role.id in self.config.nickname_prefix_rules for role in member.roles if not role.is_default()):
             return True
         if member.nick:
@@ -256,7 +278,9 @@ class AuditCogRuntimeMixin:
         reason: str,
         full: bool,
     ) -> int:
-        if not self.config.enable_members_intent or not self.config.nickname_prefix_rules:
+        if not self.config.enable_members_intent or not (
+            self.config.nickname_prefix_rules or self.config.nickname_prefix.user_rules
+        ):
             return 0
         self._persist_known_nickname_prefixes(guild.id)
         if not guild.chunked:
@@ -279,7 +303,7 @@ class AuditCogRuntimeMixin:
         return queued
 
     async def enforce_member_nickname(self, member: discord.Member) -> bool:
-        if member.bot or not self.config.nickname_prefix_rules:
+        if member.bot or not (self.config.nickname_prefix_rules or self.config.nickname_prefix.user_rules):
             return False
         if member.id in self.config.nickname_prefix_excluded_user_ids:
             return False
@@ -300,7 +324,7 @@ class AuditCogRuntimeMixin:
         try:
             await member.edit(
                 nick=desired_nick,
-                reason="EVA Assistant: синхронизация префикса ника по ролям",
+                reason="EVA Assistant: синхронизация персонального или ролевого префикса ника",
             )
         except (discord.Forbidden, discord.HTTPException):
             return False
@@ -435,7 +459,9 @@ class AuditCogRuntimeMixin:
                 pass
 
         await self.audit.ensure_guild_setup(guild, category_id=self.config.audit_category_id)
-        if self.config.enable_members_intent and self.config.nickname_prefix_rules:
+        if self.config.enable_members_intent and (
+            self.config.nickname_prefix_rules or self.config.nickname_prefix.user_rules
+        ):
             service_state = self._nickname_prefix_state(guild.id)
             signature = self._nickname_prefix_signature()
             self._persist_known_nickname_prefixes(guild.id)
@@ -477,7 +503,9 @@ class AuditCogRuntimeMixin:
 
     @tasks.loop(minutes=5)
     async def nickname_resync_scheduler(self) -> None:
-        if not self.config.enable_members_intent or not self.config.nickname_prefix_rules:
+        if not self.config.enable_members_intent or not (
+            self.config.nickname_prefix_rules or self.config.nickname_prefix.user_rules
+        ):
             return
         if self.config.nickname_prefix_resync_minutes <= 0:
             return
