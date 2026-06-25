@@ -8,6 +8,7 @@ from __future__ import annotations
 import discord
 from discord.ext import commands
 
+from roseblade_bot.air_alerts import AirAlertService
 from roseblade_bot.audit_logger import AuditLogger
 from roseblade_bot.config import BotConfig, load_config
 from roseblade_bot.cogs import EvaCommandsCog, EvaCoreCog, EvaEventsCog, EvaMusicCog, EvaSharedState
@@ -16,6 +17,7 @@ from roseblade_bot.pubg_lookup import PubgLookupService
 from roseblade_bot.server_banner import ServerBannerService
 from roseblade_bot.steam_digest import SteamDigestService
 from roseblade_bot.storage import JsonStateStore
+from roseblade_bot.war_monitor import WarMonitorService
 
 def build_bot(config: BotConfig) -> commands.Bot:
     intents = discord.Intents.default()
@@ -35,6 +37,8 @@ def build_bot(config: BotConfig) -> commands.Bot:
         pubg_lookup=PubgLookupService(config),
         steam_digest=SteamDigestService(config),
         server_banner=ServerBannerService(config),
+        air_alert=AirAlertService(config),
+        war_monitor=WarMonitorService(config),
         music=MusicService(config.music),
         audit=AuditLogger(
             store=store,

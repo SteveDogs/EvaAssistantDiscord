@@ -27,6 +27,22 @@ class ConfigTests(unittest.TestCase):
                         "SPECIAL_DM_EVENTS=voice_joined;avatar_changed",
                         "SERVER_BANNER_ENABLED=true",
                         "SERVER_BANNER_EXCLUDED_CHANNEL_IDS=11;22,33",
+                        "AIR_ALERT_ENABLED=true",
+                        "AIR_ALERT_CHANNEL_IDS=1518950671163068567;1518950671163068568",
+                        "AIR_ALERT_PROVIDER=ubilling",
+                        "AIR_ALERT_API_TOKEN=alerts-token",
+                        "AIR_ALERT_UBILLING_SOURCE=default",
+                        "AIR_ALERT_POLL_SECONDS=75",
+                        "AIR_ALERT_TITLE=Карта повітряних тривог України",
+                        "AIR_ALERT_USE_WAR_MONITOR_INTEL=true",
+                        "AIR_ALERT_INTEL_MAX_AGE_SECONDS=900",
+                        "AIR_ALERT_BULLETIN_COOLDOWN_SECONDS=180",
+                        "AIR_ALERT_HOT_REGIONS_LIMIT=7",
+                        "WAR_MONITOR_ENABLED=true",
+                        "WAR_MONITOR_CHANNEL_IDS=1518950671163068567",
+                        "WAR_MONITOR_CHANNEL_USERNAME=war_monitor",
+                        "WAR_MONITOR_POLL_SECONDS=30",
+                        "WAR_MONITOR_ANNOUNCE_ON_STARTUP=false",
                         "MUSIC_ENABLED=true",
                         "MUSIC_LAVALINK_URI=http://127.0.0.1:2333",
                         "MUSIC_LAVALINK_PASSWORD=test-pass",
@@ -60,6 +76,23 @@ class ConfigTests(unittest.TestCase):
             self.assertTrue(config.server_banner_enabled)
             self.assertEqual(config.banner.excluded_channel_ids, frozenset({11, 22, 33}))
             self.assertEqual(config.server_banner_excluded_channel_ids, frozenset({11, 22, 33}))
+            self.assertTrue(config.air_alert.enabled)
+            self.assertEqual(config.air_alert.channel_ids, frozenset({1518950671163068567, 1518950671163068568}))
+            self.assertEqual(config.air_alert.provider, "ubilling")
+            self.assertEqual(config.air_alert.api_token, "alerts-token")
+            self.assertEqual(config.air_alert.ubilling_source, "default")
+            self.assertEqual(config.air_alert.poll_seconds, 75)
+            self.assertEqual(config.air_alert.title, "Карта повітряних тривог України")
+            self.assertTrue(config.air_alert.use_war_monitor_intel)
+            self.assertEqual(config.air_alert.intel_max_age_seconds, 900)
+            self.assertEqual(config.air_alert.bulletin_cooldown_seconds, 180)
+            self.assertEqual(config.air_alert.hot_regions_limit, 7)
+            self.assertEqual(config.air_alert_channel_ids, frozenset({1518950671163068567, 1518950671163068568}))
+            self.assertTrue(config.war_monitor.enabled)
+            self.assertEqual(config.war_monitor.channel_ids, frozenset({1518950671163068567}))
+            self.assertEqual(config.war_monitor.channel_username, "war_monitor")
+            self.assertEqual(config.war_monitor.poll_seconds, 30)
+            self.assertFalse(config.war_monitor.announce_on_startup)
             self.assertTrue(config.music.enabled)
             self.assertEqual(config.music.lavalink_uri, "http://127.0.0.1:2333")
             self.assertEqual(config.music.lavalink_password, "test-pass")

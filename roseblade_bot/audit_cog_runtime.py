@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date, datetime, timedelta
+from io import BytesIO
 import random
 from typing import Any
 import unicodedata
@@ -16,6 +17,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from roseblade_bot import APP_NAME, APP_CODENAME
+from roseblade_bot.alert_intel import ThreatIntelHint
 from roseblade_bot.chat_banter import CHAT_BANTER
 from roseblade_bot.formatters import _display_name, _format_duration
 from roseblade_bot.server_banner import ServerBannerRenderResult
@@ -85,6 +87,10 @@ class AuditCogRuntimeMixin:
             self.steam_digest_scheduler.start()
         if self.server_banner.is_enabled and not self.server_banner_scheduler.is_running():
             self.server_banner_scheduler.start()
+        if self.air_alert.is_configured and not self.air_alert_scheduler.is_running():
+            self.air_alert_scheduler.start()
+        if self.war_monitor.is_configured and not self.war_monitor_scheduler.is_running():
+            self.war_monitor_scheduler.start()
         if self.config.enable_members_intent and self.config.nickname_prefix_rules and not self.nickname_sync_worker.is_running():
             self.nickname_sync_worker.start()
         if self.config.enable_members_intent and self.config.nickname_prefix_rules and not self.nickname_resync_scheduler.is_running():
@@ -365,6 +371,10 @@ class AuditCogRuntimeMixin:
             self.steam_digest_scheduler.cancel()
         if self.server_banner_scheduler.is_running():
             self.server_banner_scheduler.cancel()
+        if self.air_alert_scheduler.is_running():
+            self.air_alert_scheduler.cancel()
+        if self.war_monitor_scheduler.is_running():
+            self.war_monitor_scheduler.cancel()
         if self.nickname_sync_worker.is_running():
             self.nickname_sync_worker.cancel()
         if self.nickname_resync_scheduler.is_running():
@@ -398,12 +408,16 @@ class AuditCogRuntimeMixin:
                 await self.bootstrap_guild(guild)
             await self.run_startup_protected_ban_check()
             await self.run_startup_server_banner_refresh()
+            await self.run_startup_air_alert_refresh()
+            await self.run_startup_war_monitor_sync()
             return
 
         for guild in self.bot.guilds:
             await self.bootstrap_guild(guild)
         await self.run_startup_protected_ban_check()
         await self.run_startup_server_banner_refresh()
+        await self.run_startup_air_alert_refresh()
+        await self.run_startup_war_monitor_sync()
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild) -> None:
@@ -652,6 +666,25 @@ class AuditCogRuntimeMixin:
             await self.refresh_guild_server_banner(guild, force=True, source="startup")
         self._server_banner_startup_refresh_done = True
 
+    async def run_startup_air_alert_refresh(self) -> None:
+        if not self.air_alert.is_configured or self._air_alert_startup_refresh_done:
+            return
+        try:
+            snapshot = await self.air_alert.fetch_snapshot()
+        except Exception as error:
+            print(f"Air alert startup fetch failed: {error}")
+            return
+        intel_hints = await self.fetch_air_alert_intel_hints()
+        await self.dispatch_air_alert_snapshot(
+            snapshot,
+            force_publish=True,
+            notify_transitions=False,
+            intel_hints=intel_hints,
+            publish_intel_bulletins=False,
+            seed_intel_seen=True,
+        )
+        self._air_alert_startup_refresh_done = True
+
     @tasks.loop(minutes=1)
     async def server_banner_scheduler(self) -> None:
         if not self.server_banner.is_enabled:
@@ -666,6 +699,213 @@ class AuditCogRuntimeMixin:
     @server_banner_scheduler.error
     async def server_banner_scheduler_error(self, error: Exception) -> None:
         print(f"Server banner scheduler crashed: {error}")
+
+    @tasks.loop(seconds=30)
+    async def air_alert_scheduler(self) -> None:
+        if not self.air_alert.is_configured:
+            return
+
+        target_guild_ids = self._configured_air_alert_guild_ids()
+        if not target_guild_ids:
+            return
+
+        now = discord.utils.utcnow()
+        due = False
+        for guild_id in target_guild_ids:
+            state = self._air_alert_state(guild_id)
+            last_polled = self._parse_state_datetime(state.get("last_polled_at"))
+            if last_polled is None or now - last_polled >= timedelta(seconds=self.config.air_alert.poll_seconds):
+                due = True
+                break
+        if not due:
+            return
+
+        try:
+            snapshot = await self.air_alert.fetch_snapshot()
+        except Exception as error:
+            print(f"Air alert fetch failed: {error}")
+            for guild_id in target_guild_ids:
+                state = self._air_alert_state(guild_id)
+                state["last_error"] = str(error)
+                self.store.set_service_state(guild_id, "air_alert", state)
+            return
+
+        intel_hints = await self.fetch_air_alert_intel_hints()
+
+        await self.dispatch_air_alert_snapshot(
+            snapshot,
+            force_publish=False,
+            notify_transitions=True,
+            intel_hints=intel_hints,
+            publish_intel_bulletins=True,
+            seed_intel_seen=False,
+        )
+
+    @air_alert_scheduler.before_loop
+    async def before_air_alert_scheduler(self) -> None:
+        await self.bot.wait_until_ready()
+
+    @air_alert_scheduler.error
+    async def air_alert_scheduler_error(self, error: Exception) -> None:
+        print(f"Air alert scheduler crashed: {error}")
+
+    def _resolve_war_monitor_channel(self, channel_id: int) -> discord.TextChannel | discord.Thread | None:
+        cached = self.bot.get_channel(channel_id)
+        if isinstance(cached, (discord.TextChannel, discord.Thread)):
+            return cached
+
+        for guild in self.bot.guilds:
+            getter = getattr(guild, "get_channel_or_thread", None)
+            if callable(getter):
+                candidate = getter(channel_id)
+            else:
+                candidate = guild.get_channel(channel_id)
+                if candidate is None:
+                    thread_getter = getattr(guild, "get_thread", None)
+                    candidate = thread_getter(channel_id) if callable(thread_getter) else None
+            if isinstance(candidate, (discord.TextChannel, discord.Thread)):
+                return candidate
+        return None
+
+    def _configured_war_monitor_channels_by_guild(self) -> dict[int, list[discord.TextChannel | discord.Thread]]:
+        channels_by_guild: dict[int, list[discord.TextChannel | discord.Thread]] = {}
+        for channel_id in sorted(self.config.war_monitor.channel_ids):
+            channel = self._resolve_war_monitor_channel(channel_id)
+            if channel is None:
+                continue
+            channels_by_guild.setdefault(channel.guild.id, []).append(channel)
+        return channels_by_guild
+
+    def _configured_war_monitor_guild_ids(self) -> set[int]:
+        return set(self._configured_war_monitor_channels_by_guild())
+
+    def _war_monitor_state(self, guild_id: int) -> dict[str, Any]:
+        return self.store.get_service_state(guild_id, "war_monitor")
+
+    async def run_startup_war_monitor_sync(self) -> None:
+        if not self.war_monitor.is_configured or self._war_monitor_startup_sync_done:
+            return
+        try:
+            posts = await self.war_monitor.fetch_recent_posts()
+        except Exception as error:
+            print(f"War monitor startup fetch failed: {error}")
+            return
+
+        max_post_id = max((post.post_id for post in posts), default=0)
+        for guild_id in self._configured_war_monitor_guild_ids():
+            state = self._war_monitor_state(guild_id)
+            state["last_poll_at"] = discord.utils.utcnow().isoformat()
+            state["last_seen_post_id"] = max_post_id
+            state["last_error"] = None
+            self.store.set_service_state(guild_id, "war_monitor", state)
+
+        self._war_monitor_startup_sync_done = True
+        if not self.config.war_monitor.announce_on_startup:
+            return
+
+        recent_posts = [
+            post
+            for post in posts
+            if self.war_monitor.is_relevant_threat(post.text)
+        ]
+        if not recent_posts:
+            return
+        latest_post = max(recent_posts, key=lambda item: item.post_id)
+        if discord.utils.utcnow() - latest_post.published_at > timedelta(minutes=5):
+            return
+        await self.dispatch_war_monitor_posts([latest_post], mark_as_seen=False)
+
+    async def dispatch_war_monitor_posts(
+        self,
+        posts,
+        *,
+        mark_as_seen: bool,
+    ) -> None:
+        channels_by_guild = self._configured_war_monitor_channels_by_guild()
+        if not channels_by_guild:
+            return
+
+        filtered_posts = [post for post in posts if self.war_monitor.is_relevant_threat(post.text)]
+        if not filtered_posts:
+            if mark_as_seen:
+                max_post_id = max((post.post_id for post in posts), default=0)
+                for guild_id in channels_by_guild:
+                    state = self._war_monitor_state(guild_id)
+                    if max_post_id:
+                        state["last_seen_post_id"] = max_post_id
+                    state["last_poll_at"] = discord.utils.utcnow().isoformat()
+                    state["last_error"] = None
+                    self.store.set_service_state(guild_id, "war_monitor", state)
+            return
+
+        filtered_posts.sort(key=lambda item: item.post_id)
+        max_post_id = max((post.post_id for post in posts), default=0)
+        now = discord.utils.utcnow().isoformat()
+
+        for guild_id, channels in channels_by_guild.items():
+            state = self._war_monitor_state(guild_id)
+            last_seen_post_id = int(state.get("last_seen_post_id", 0) or 0)
+            guild_posts = [post for post in filtered_posts if post.post_id > last_seen_post_id]
+            publish_errors: list[str] = []
+            last_sent_post_id = int(state.get("last_sent_post_id", 0) or 0)
+            for post in guild_posts:
+                content = self.war_monitor.build_alert_message(post)
+                for channel in channels:
+                    try:
+                        await channel.send(content)
+                    except (discord.Forbidden, discord.HTTPException) as error:
+                        publish_errors.append(f"{channel.id}: {error}")
+                last_sent_post_id = max(last_sent_post_id, post.post_id)
+
+            if mark_as_seen and max_post_id:
+                state["last_seen_post_id"] = max(max_post_id, int(state.get("last_seen_post_id", 0) or 0))
+            if last_sent_post_id:
+                state["last_sent_post_id"] = last_sent_post_id
+                state["last_sent_at"] = now
+            state["last_poll_at"] = now
+            state["last_error"] = " | ".join(publish_errors) if publish_errors else None
+            self.store.set_service_state(guild_id, "war_monitor", state)
+
+    @tasks.loop(seconds=20)
+    async def war_monitor_scheduler(self) -> None:
+        if not self.war_monitor.is_configured:
+            return
+
+        target_guild_ids = self._configured_war_monitor_guild_ids()
+        if not target_guild_ids:
+            return
+
+        now = discord.utils.utcnow()
+        due = False
+        for guild_id in target_guild_ids:
+            state = self._war_monitor_state(guild_id)
+            last_polled = self._parse_state_datetime(state.get("last_poll_at"))
+            if last_polled is None or now - last_polled >= timedelta(seconds=self.config.war_monitor.poll_seconds):
+                due = True
+                break
+        if not due:
+            return
+
+        try:
+            posts = await self.war_monitor.fetch_recent_posts()
+        except Exception as error:
+            print(f"War monitor fetch failed: {error}")
+            for guild_id in target_guild_ids:
+                state = self._war_monitor_state(guild_id)
+                state["last_error"] = str(error)
+                state["last_poll_at"] = now.isoformat()
+                self.store.set_service_state(guild_id, "war_monitor", state)
+            return
+
+        await self.dispatch_war_monitor_posts(posts, mark_as_seen=True)
+
+    @war_monitor_scheduler.before_loop
+    async def before_war_monitor_scheduler(self) -> None:
+        await self.bot.wait_until_ready()
+
+    @war_monitor_scheduler.error
+    async def war_monitor_scheduler_error(self, error: Exception) -> None:
+        print(f"War monitor scheduler crashed: {error}")
 
     @tasks.loop(minutes=1)
     async def steam_digest_scheduler(self) -> None:
@@ -1002,6 +1242,329 @@ class AuditCogRuntimeMixin:
         channel_dates[str(channel_id)] = today.isoformat()
         service_state["last_sent_by_channel"] = channel_dates
         self.store.set_service_state(guild_id, "steam_digest", service_state)
+
+    def _resolve_air_alert_channel(self, channel_id: int) -> discord.TextChannel | discord.Thread | None:
+        cached = self.bot.get_channel(channel_id)
+        if isinstance(cached, (discord.TextChannel, discord.Thread)):
+            return cached
+
+        for guild in self.bot.guilds:
+            getter = getattr(guild, "get_channel_or_thread", None)
+            if callable(getter):
+                candidate = getter(channel_id)
+            else:
+                candidate = guild.get_channel(channel_id)
+                if candidate is None:
+                    thread_getter = getattr(guild, "get_thread", None)
+                    candidate = thread_getter(channel_id) if callable(thread_getter) else None
+            if isinstance(candidate, (discord.TextChannel, discord.Thread)):
+                return candidate
+        return None
+
+    def _configured_air_alert_channels_by_guild(self) -> dict[int, list[discord.TextChannel | discord.Thread]]:
+        channels_by_guild: dict[int, list[discord.TextChannel | discord.Thread]] = {}
+        for channel_id in sorted(self.config.air_alert.channel_ids):
+            channel = self._resolve_air_alert_channel(channel_id)
+            if channel is None:
+                continue
+            channels_by_guild.setdefault(channel.guild.id, []).append(channel)
+        return channels_by_guild
+
+    def _configured_air_alert_guild_ids(self) -> set[int]:
+        return set(self._configured_air_alert_channels_by_guild())
+
+    def _air_alert_state(self, guild_id: int) -> dict[str, Any]:
+        return self.store.get_service_state(guild_id, "air_alert")
+
+    async def fetch_air_alert_intel_hints(self) -> tuple[ThreatIntelHint, ...]:
+        if not self.config.air_alert.use_war_monitor_intel:
+            return ()
+        if not self.config.war_monitor.channel_username.strip():
+            return ()
+        try:
+            posts = await self.war_monitor.fetch_recent_posts(limit=12)
+        except Exception as error:
+            print(f"Air alert intel fetch failed: {error}")
+            return ()
+
+        hints: list[ThreatIntelHint] = []
+        now = discord.utils.utcnow()
+        max_age = timedelta(seconds=self.config.air_alert.intel_max_age_seconds)
+        for post in posts:
+            hint = self.war_monitor.extract_intel(post)
+            if hint is None:
+                continue
+            if now - hint.published_at > max_age:
+                continue
+            hints.append(hint)
+        hints.sort(key=lambda item: item.post_id)
+        return tuple(hints)
+
+    @staticmethod
+    def _parse_state_datetime(raw_value: Any) -> datetime | None:
+        if not isinstance(raw_value, str):
+            return None
+        cleaned = raw_value.strip()
+        if not cleaned:
+            return None
+        if cleaned.endswith("Z"):
+            cleaned = cleaned[:-1] + "+00:00"
+        try:
+            return datetime.fromisoformat(cleaned)
+        except ValueError:
+            return None
+
+    async def dispatch_air_alert_snapshot(
+        self,
+        snapshot,
+        *,
+        force_publish: bool,
+        notify_transitions: bool,
+        intel_hints: tuple[ThreatIntelHint, ...] = (),
+        publish_intel_bulletins: bool,
+        seed_intel_seen: bool,
+    ) -> None:
+        channels_by_guild = self._configured_air_alert_channels_by_guild()
+        if not channels_by_guild:
+            return
+
+        render = await self.air_alert.render_map(snapshot, intel_hints)
+        embed = self.air_alert.build_map_embed(snapshot, render, intel_hints)
+
+        for guild_id, channels in channels_by_guild.items():
+            state = self._air_alert_state(guild_id)
+            previous_status = state.get("last_oblast_status_string")
+            previous_started_raw = state.get("started_at_by_region")
+            previous_started: dict[str, datetime | None] = {}
+            if isinstance(previous_started_raw, dict):
+                for region_title, started_at in previous_started_raw.items():
+                    previous_started[str(region_title)] = self._parse_state_datetime(started_at)
+
+            transitions = self.air_alert.detect_transitions(
+                previous_status if isinstance(previous_status, str) else None,
+                snapshot,
+                previous_started,
+            )
+            if notify_transitions and transitions:
+                await self._send_air_alert_transitions(channels, transitions, snapshot, intel_hints)
+
+            if self.config.air_alert.use_war_monitor_intel and intel_hints:
+                await self._send_air_alert_intel_bulletins(
+                    channels,
+                    snapshot,
+                    intel_hints,
+                    state=state,
+                    publish=publish_intel_bulletins,
+                    seed_only=seed_intel_seen,
+                )
+
+            current_started = {
+                region_title: (
+                    region.started_at.isoformat() if region.started_at is not None else None
+                )
+                for region_title, region in snapshot.regions.items()
+            }
+
+            published_any = False
+            publish_errors: list[str] = []
+            message_states = state.get("messages")
+            known_channel_ids = (
+                {str(key) for key in message_states}
+                if isinstance(message_states, dict)
+                else set()
+            )
+            should_publish = force_publish or state.get("last_signature") != render.signature
+            if not should_publish:
+                should_publish = any(str(channel.id) not in known_channel_ids for channel in channels)
+
+            if should_publish:
+                for channel in channels:
+                    try:
+                        await self._replace_air_alert_map_message(
+                            channel,
+                            state=state,
+                            embed=embed,
+                            image_bytes=render.image_bytes,
+                            signature=render.signature,
+                        )
+                        published_any = True
+                    except (discord.Forbidden, discord.HTTPException) as error:
+                        publish_errors.append(f"{channel.id}: {error}")
+
+            state["last_polled_at"] = snapshot.fetched_at.isoformat()
+            state["last_oblast_status_string"] = snapshot.oblast_status_string
+            state["started_at_by_region"] = current_started
+            state["last_transition_count"] = len(transitions)
+            if transitions:
+                state["last_transition_at"] = snapshot.fetched_at.isoformat()
+            if published_any:
+                state["last_signature"] = render.signature
+                state["last_map_at"] = snapshot.fetched_at.isoformat()
+            elif force_publish and not publish_errors:
+                state["last_signature"] = render.signature
+            state["last_error"] = " | ".join(publish_errors) if publish_errors else None
+            self.store.set_service_state(guild_id, "air_alert", state)
+
+    async def _send_air_alert_transitions(
+        self,
+        channels: list[discord.TextChannel | discord.Thread],
+        transitions,
+        snapshot,
+        intel_hints: tuple[ThreatIntelHint, ...],
+    ) -> None:
+        if not channels or not transitions:
+            return
+
+        embeds = (
+            [self.air_alert.build_transition_summary_embed(transitions, snapshot, intel_hints)]
+            if len(transitions) > 4
+            else [self.air_alert.build_transition_embed(item, snapshot, intel_hints) for item in transitions]
+        )
+        for channel in channels:
+            for embed in embeds:
+                try:
+                    await channel.send(embed=embed)
+                except (discord.Forbidden, discord.HTTPException):
+                    break
+
+    async def _send_air_alert_intel_bulletins(
+        self,
+        channels: list[discord.TextChannel | discord.Thread],
+        snapshot,
+        intel_hints: tuple[ThreatIntelHint, ...],
+        *,
+        state: dict[str, Any],
+        publish: bool,
+        seed_only: bool,
+    ) -> None:
+        if not intel_hints:
+            return
+
+        last_seen_post_id = int(state.get("last_intel_post_id", 0) or 0)
+        recent_fingerprints = state.get("recent_intel_fingerprints")
+        if not isinstance(recent_fingerprints, dict):
+            recent_fingerprints = {}
+
+        latest_seen = last_seen_post_id
+        publishable: list[ThreatIntelHint] = []
+        now = snapshot.fetched_at
+        cooldown = timedelta(seconds=self.config.air_alert.bulletin_cooldown_seconds)
+
+        for hint in intel_hints:
+            latest_seen = max(latest_seen, hint.post_id)
+            if hint.post_id <= last_seen_post_id:
+                continue
+            if not self._should_publish_air_alert_intel_hint(hint, snapshot):
+                continue
+            fingerprint = self._air_alert_intel_fingerprint(hint)
+            last_sent_at = self._parse_state_datetime(recent_fingerprints.get(fingerprint))
+            if last_sent_at is not None and now - last_sent_at < cooldown:
+                continue
+            publishable.append(hint)
+            recent_fingerprints[fingerprint] = now.isoformat()
+
+        state["last_intel_post_id"] = latest_seen
+        state["recent_intel_fingerprints"] = {
+            key: value
+            for key, value in recent_fingerprints.items()
+            if (parsed := self._parse_state_datetime(value)) is not None and now - parsed <= timedelta(hours=3)
+        }
+
+        if seed_only or not publish:
+            return
+
+        for hint in publishable:
+            official_context = self._air_alert_hint_context(hint, snapshot)
+            content = self.war_monitor.build_hint_message(hint, official_context=official_context)
+            for channel in channels:
+                try:
+                    await channel.send(content)
+                except (discord.Forbidden, discord.HTTPException):
+                    break
+
+    @staticmethod
+    def _air_alert_intel_fingerprint(hint: ThreatIntelHint) -> str:
+        scope = ",".join(hint.regions) if hint.regions else ("ALL" if hint.is_national else "UNKNOWN")
+        excerpt = " ".join(hint.excerpt.lower().split())[:80]
+        return f"{hint.kind}|{scope}|{excerpt}"
+
+    @staticmethod
+    def _should_publish_air_alert_intel_hint(hint: ThreatIntelHint, snapshot) -> bool:
+        if hint.kind in {"ballistic", "mig", "drone", "cab", "aviation"}:
+            return True
+        if hint.is_national or not hint.regions:
+            return True
+        for region_title in hint.regions:
+            region = snapshot.regions.get(region_title)
+            if region is not None and region.status != "N":
+                return True
+        return True
+
+    @staticmethod
+    def _air_alert_hint_context(hint: ThreatIntelHint, snapshot) -> str | None:
+        matched_regions: list[str] = []
+        for region_title in hint.regions:
+            region = snapshot.regions.get(region_title)
+            if region is not None and region.status != "N":
+                matched_regions.append(region_title)
+
+        if matched_regions:
+            if len(matched_regions) == 1:
+                return f"По карті Єви зараз під сиреною: **{matched_regions[0]}**."
+            if len(matched_regions) == 2:
+                return f"По карті Єви зараз під сиреною: **{matched_regions[0]}** та **{matched_regions[1]}**."
+            return f"По карті Єви зараз під сиреною: **{matched_regions[0]}** та ще {len(matched_regions) - 1} регіони."
+
+        if hint.is_national:
+            hot_regions = [
+                region.title
+                for region in snapshot.regions.values()
+                if region.status != "N"
+            ][:3]
+            if hot_regions:
+                return f"По карті Єви зараз шумлять: **{', '.join(hot_regions)}**."
+            return "По карті Єви зараз тривожний рух по країні."
+
+        return None
+
+    async def _replace_air_alert_map_message(
+        self,
+        channel: discord.TextChannel | discord.Thread,
+        *,
+        state: dict[str, Any],
+        embed: discord.Embed,
+        image_bytes: bytes,
+        signature: str,
+    ) -> None:
+        message_states = state.get("messages")
+        if not isinstance(message_states, dict):
+            message_states = {}
+        channel_state = message_states.get(str(channel.id))
+        if not isinstance(channel_state, dict):
+            channel_state = {}
+
+        previous_message_id = channel_state.get("message_id")
+        if isinstance(previous_message_id, int):
+            try:
+                previous_message = await channel.fetch_message(previous_message_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                previous_message = None
+            if previous_message is not None:
+                try:
+                    await previous_message.delete()
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    pass
+
+        payload_embed = embed.copy()
+        payload_embed.set_image(url="attachment://ukraine-air-alerts.png")
+        attachment = discord.File(BytesIO(image_bytes), filename="ukraine-air-alerts.png")
+        sent = await channel.send(embed=payload_embed, file=attachment)
+        message_states[str(channel.id)] = {
+            "message_id": sent.id,
+            "signature": signature,
+            "updated_at": snapshot_time.isoformat() if (snapshot_time := discord.utils.utcnow()) else None,
+        }
+        state["messages"] = message_states
 
     def is_protected_voice_guard_target(self, member: discord.Member) -> bool:
         if not self.config.protected_voice_guard_enabled:

@@ -120,6 +120,24 @@ class AuditCogCommandsMixin:
             f" bg={self.server_banner.custom_background_label()},"
             f" last_status={server_banner_state.get('last_status', 'n/a')}"
         )
+        lines.append(
+            "Air alerts:"
+            f" enabled={_bool_label(self.config.air_alert.enabled)},"
+            f" configured={_bool_label(self.air_alert.is_configured)},"
+            f" channels={self.air_alert.channel_count()},"
+            f" schedule={self.air_alert.schedule_label()},"
+            f" provider={self.air_alert.provider_label()},"
+            f" intel={_bool_label(self.config.air_alert.use_war_monitor_intel)},"
+            f" last_error={self._air_alert_state(interaction.guild.id).get('last_error', 'n/a') or 'n/a'}"
+        )
+        lines.append(
+            "War monitor:"
+            f" enabled={_bool_label(self.config.war_monitor.enabled)},"
+            f" configured={_bool_label(self.war_monitor.is_configured)},"
+            f" channels={self.war_monitor.channel_count()},"
+            f" schedule={self.war_monitor.schedule_label()},"
+            f" last_error={self._war_monitor_state(interaction.guild.id).get('last_error', 'n/a') or 'n/a'}"
+        )
         ignored = saved["ignored"]
         ignored_channel_count = len(self.get_ignored_channel_ids(interaction.guild.id))
         lines.append(
@@ -272,6 +290,52 @@ class AuditCogCommandsMixin:
             return
 
         await interaction.followup.send("Тестовый Steam-дайджест отправлен в этот канал.", ephemeral=True)
+
+    @app_commands.command(name="air_alert_now", description="Отправить текущую карту повітряних тривог в этот канал")
+    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.guild_only()
+    async def air_alert_now(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        if not self.config.air_alert.enabled:
+            await interaction.followup.send(
+                "Сервис повітряних тривог сейчас выключен в конфиге.",
+                ephemeral=True,
+            )
+            return
+
+        if not self.air_alert.is_configured:
+            await interaction.followup.send(
+                "Сервис тревог не настроен. Нормальный вариант: дай `AIR_ALERT_API_TOKEN` и поставь `AIR_ALERT_PROVIDER=alerts_in_ua`. "
+                "Fallback-режим без токена тоже есть: `AIR_ALERT_PROVIDER=ubilling`.",
+                ephemeral=True,
+            )
+            return
+
+        channel = interaction.channel
+        if channel is None or not isinstance(channel, (discord.TextChannel, discord.Thread)):
+            await interaction.followup.send(
+                "Нужен обычный текстовый канал или ветка, чтобы отправить карту тревог.",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            snapshot = await self.air_alert.fetch_snapshot()
+            intel_hints = await self.fetch_air_alert_intel_hints()
+            render = await self.air_alert.render_map(snapshot, intel_hints)
+            embed = self.air_alert.build_map_embed(snapshot, render, intel_hints)
+            embed.set_image(url="attachment://ukraine-air-alerts.png")
+            image = discord.File(BytesIO(render.image_bytes), filename="ukraine-air-alerts.png")
+            await channel.send(embed=embed, file=image)
+        except (discord.Forbidden, discord.HTTPException) as error:
+            await interaction.followup.send(f"Не смогла отправить карту тревог: {error}", ephemeral=True)
+            return
+        except Exception as error:
+            await interaction.followup.send(f"Не смогла собрать карту тревог: {error}", ephemeral=True)
+            return
+
+        await interaction.followup.send("Свежая карта повітряних тривог отправлена в этот канал.", ephemeral=True)
 
     @app_commands.command(name="server_banner_now", description="Отправить в Discord свежий live-баннер сервера")
     @app_commands.checks.has_permissions(administrator=True)

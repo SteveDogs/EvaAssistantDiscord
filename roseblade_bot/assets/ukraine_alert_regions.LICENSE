@@ -1,0 +1,15 @@
+Ukraine regional geometry bundled for EVA Assistant
+
+File:
+- ukraine_alert_regions.geojson
+
+Source:
+- geoBoundariesSimplified.geojson from https://github.com/sergeiown/Map_with_Marker_Clusters
+- Original geodata attribution in that project points to https://www.geoboundaries.org
+
+License:
+- MIT License
+- Copyright (c) 2023 - 2024 Serhii I. Myshko
+
+Included here so EVA Assistant can render a local air-alert map without depending
+on a third-party image host at runtime.
