@@ -14,6 +14,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from roseblade_bot.air_alerts import AirAlertService
 from roseblade_bot.audit_logger import AuditLogger
 from roseblade_bot.config import BotConfig
 from roseblade_bot.music import MusicService
@@ -21,6 +22,7 @@ from roseblade_bot.pubg_lookup import PubgLookupService
 from roseblade_bot.server_banner import ServerBannerService
 from roseblade_bot.steam_digest import SteamDigestService
 from roseblade_bot.storage import JsonStateStore
+from roseblade_bot.war_monitor import WarMonitorService
 
 
 @dataclass(slots=True)
@@ -31,6 +33,8 @@ class EvaSharedState:
     pubg_lookup: PubgLookupService
     steam_digest: SteamDigestService
     server_banner: ServerBannerService
+    air_alert: AirAlertService
+    war_monitor: WarMonitorService
     music: MusicService
     audit: AuditLogger
     _bootstrapped_guild_ids: set[int] = field(default_factory=set)
@@ -47,6 +51,8 @@ class EvaSharedState:
     _protected_voice_guard_recent: dict[tuple[int, int, int, int | None], datetime] = field(default_factory=dict)
     _protected_ban_startup_check_done: bool = False
     _server_banner_startup_refresh_done: bool = False
+    _air_alert_startup_refresh_done: bool = False
+    _war_monitor_startup_sync_done: bool = False
 
 
 _SHARED_ATTR_NAMES = frozenset(EvaSharedState.__dataclass_fields__.keys())

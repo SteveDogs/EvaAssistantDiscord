@@ -130,6 +130,30 @@ class ServerBannerConfig:
 
 
 @dataclass(slots=True)
+class AirAlertConfig:
+    enabled: bool
+    channel_ids: frozenset[int]
+    provider: str
+    api_token: str
+    ubilling_source: str
+    poll_seconds: int
+    title: str
+    use_war_monitor_intel: bool
+    intel_max_age_seconds: int
+    bulletin_cooldown_seconds: int
+    hot_regions_limit: int
+
+
+@dataclass(slots=True)
+class WarMonitorConfig:
+    enabled: bool
+    channel_ids: frozenset[int]
+    channel_username: str
+    poll_seconds: int
+    announce_on_startup: bool
+
+
+@dataclass(slots=True)
 class MusicConfig:
     enabled: bool
     lavalink_uri: str
@@ -197,6 +221,22 @@ _LEGACY_ALIASES = {
     "server_banner_background_path": "banner.background_path",
     "server_banner_font_path": "banner.font_path",
     "server_banner_excluded_channel_ids": "banner.excluded_channel_ids",
+    "air_alert_enabled": "air_alert.enabled",
+    "air_alert_channel_ids": "air_alert.channel_ids",
+    "air_alert_provider": "air_alert.provider",
+    "air_alert_api_token": "air_alert.api_token",
+    "air_alert_ubilling_source": "air_alert.ubilling_source",
+    "air_alert_poll_seconds": "air_alert.poll_seconds",
+    "air_alert_title": "air_alert.title",
+    "air_alert_use_war_monitor_intel": "air_alert.use_war_monitor_intel",
+    "air_alert_intel_max_age_seconds": "air_alert.intel_max_age_seconds",
+    "air_alert_bulletin_cooldown_seconds": "air_alert.bulletin_cooldown_seconds",
+    "air_alert_hot_regions_limit": "air_alert.hot_regions_limit",
+    "war_monitor_enabled": "war_monitor.enabled",
+    "war_monitor_channel_ids": "war_monitor.channel_ids",
+    "war_monitor_channel_username": "war_monitor.channel_username",
+    "war_monitor_poll_seconds": "war_monitor.poll_seconds",
+    "war_monitor_announce_on_startup": "war_monitor.announce_on_startup",
     "music_enabled": "music.enabled",
     "music_lavalink_uri": "music.lavalink_uri",
     "music_lavalink_password": "music.lavalink_password",
@@ -223,6 +263,8 @@ class BotConfig:
     pubg: PubgConfig
     steam: SteamDigestConfig
     banner: ServerBannerConfig
+    air_alert: AirAlertConfig
+    war_monitor: WarMonitorConfig
     music: MusicConfig
 
     def __getattr__(self, name: str) -> Any:
@@ -424,6 +466,27 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
         font_path=_parse_optional_path_env("SERVER_BANNER_FONT_PATH", root_dir),
         excluded_channel_ids=_parse_id_set_env("SERVER_BANNER_EXCLUDED_CHANNEL_IDS"),
     )
+    air_alert_config = AirAlertConfig(
+        enabled=_parse_bool_env("AIR_ALERT_ENABLED", default=False),
+        channel_ids=_parse_id_set_env("AIR_ALERT_CHANNEL_IDS"),
+        provider=(os.getenv("AIR_ALERT_PROVIDER", "auto").strip().lower() or "auto"),
+        api_token=os.getenv("AIR_ALERT_API_TOKEN", "").strip(),
+        ubilling_source=(os.getenv("AIR_ALERT_UBILLING_SOURCE", "default").strip().lower() or "default"),
+        poll_seconds=max(30, _parse_int_env("AIR_ALERT_POLL_SECONDS", default=60)),
+        title=os.getenv("AIR_ALERT_TITLE", "Карта повітряних тривог України").strip()
+        or "Карта повітряних тривог України",
+        use_war_monitor_intel=_parse_bool_env("AIR_ALERT_USE_WAR_MONITOR_INTEL", default=True),
+        intel_max_age_seconds=max(60, _parse_int_env("AIR_ALERT_INTEL_MAX_AGE_SECONDS", default=600)),
+        bulletin_cooldown_seconds=max(30, _parse_int_env("AIR_ALERT_BULLETIN_COOLDOWN_SECONDS", default=240)),
+        hot_regions_limit=max(3, min(10, _parse_int_env("AIR_ALERT_HOT_REGIONS_LIMIT", default=5))),
+    )
+    war_monitor_config = WarMonitorConfig(
+        enabled=_parse_bool_env("WAR_MONITOR_ENABLED", default=False),
+        channel_ids=_parse_id_set_env("WAR_MONITOR_CHANNEL_IDS"),
+        channel_username=os.getenv("WAR_MONITOR_CHANNEL_USERNAME", "war_monitor").strip() or "war_monitor",
+        poll_seconds=max(30, _parse_int_env("WAR_MONITOR_POLL_SECONDS", default=45)),
+        announce_on_startup=_parse_bool_env("WAR_MONITOR_ANNOUNCE_ON_STARTUP", default=False),
+    )
     music_config = MusicConfig(
         enabled=_parse_bool_env("MUSIC_ENABLED", default=False),
         lavalink_uri=os.getenv("MUSIC_LAVALINK_URI", "http://127.0.0.1:2333").strip() or "http://127.0.0.1:2333",
@@ -449,5 +512,7 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
         pubg=pubg_config,
         steam=steam_config,
         banner=banner_config,
+        air_alert=air_alert_config,
+        war_monitor=war_monitor_config,
         music=music_config,
     )
