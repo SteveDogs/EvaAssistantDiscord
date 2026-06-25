@@ -20,6 +20,7 @@ class ConfigTests(unittest.TestCase):
                         "ENABLE_PRESENCES_INTENT=true",
                         "ENABLE_MESSAGE_CONTENT_INTENT=true",
                         "NICK_PREFIX_RULES=1=🌸;2=⭐️",
+                        "NICK_PREFIX_USER_RULES=380036631584833558=💅",
                         "PUBG_LOOKUP_ENABLED=true",
                         "PUBG_PLATFORM=steam",
                         "SPECIAL_DM_ENABLED=true",
@@ -68,6 +69,7 @@ class ConfigTests(unittest.TestCase):
             self.assertTrue(config.discord.intents.members)
             self.assertTrue(config.enable_message_content_intent)
             self.assertEqual(config.nickname_prefix.rules[1], "🌸")
+            self.assertEqual(config.nickname_prefix.user_rules[380036631584833558], "💅")
             self.assertTrue(config.pubg.enabled)
             self.assertEqual(config.pubg.platform, "steam")
             self.assertTrue(config.special_dm.enabled)
