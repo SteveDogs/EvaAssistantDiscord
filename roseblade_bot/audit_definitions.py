@@ -83,7 +83,12 @@ CHANNEL_DEFINITIONS: dict[str, ChannelDefinition] = {
     "members": ChannelDefinition(
         key="members",
         name="участники",
-        description="Вход, выход, смена никнейма, роли и бусты.",
+        description="Вход, смена никнейма, роли и бусты.",
+    ),
+    "departures": ChannelDefinition(
+        key="departures",
+        name="покинули-сервер",
+        description="Отдельный журнал тех, кто вышел или исчез с сервера.",
     ),
     "server": ChannelDefinition(
         key="server",
@@ -165,7 +170,7 @@ EVENT_DEFINITIONS: dict[str, EventDefinition] = {
     "message_pinned": EventDefinition("message_pinned", "Сообщение закреплено", "messages", 0xF1C40F, "📌"),
     "message_unpinned": EventDefinition("message_unpinned", "Сообщение откреплено", "messages", 0x95A5A6, "📍"),
     "member_joined": EventDefinition("member_joined", "Участник присоединился", "members", 0x2ECC71, "📥"),
-    "member_left": EventDefinition("member_left", "Участник покинул сервер", "members", 0x95A5A6, "📤"),
+    "member_left": EventDefinition("member_left", "Участник покинул сервер", "departures", 0x95A5A6, "📤"),
     "nickname_changed": EventDefinition("nickname_changed", "Никнейм изменён", "members", 0x1ABC9C, "🪪"),
     "member_role_added": EventDefinition("member_role_added", "Роль накинута", "member_roles", 0x2ECC71, "➕"),
     "member_role_removed": EventDefinition("member_role_removed", "Роль снята", "member_roles", 0xE67E22, "➖"),
