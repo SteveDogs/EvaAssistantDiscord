@@ -311,6 +311,20 @@ AUDIT_CATEGORY_ID=123456789012345678
 python main.py
 ```
 
+Для VPS лучше не держать EVA на ручном `nohup`, а сразу завернуть её в `systemd`, чтобы бот сам переживал ребуты сервера:
+
+- `deploy/bot/eva-assistant.service.example`
+- `deploy/lavalink/eva-lavalink.service.example`
+
+Типовой запуск на Linux:
+
+```bash
+sudo cp deploy/bot/eva-assistant.service.example /etc/systemd/system/eva-assistant.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now eva-assistant.service
+sudo systemctl status eva-assistant.service
+```
+
 ## Права бота в Discord
 
 Обязательные:
@@ -668,6 +682,8 @@ LICENSE
 NOTICE.md
 main.py
 deploy/
+  bot/
+    eva-assistant.service.example
   lavalink/
     application.yml.example
     eva-lavalink.service.example
