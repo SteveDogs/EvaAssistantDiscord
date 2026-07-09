@@ -1,0 +1,16 @@
+[Unit]
+Description=EVA Assistant Discord Bot
+After=network-online.target eva-lavalink.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/RoseBladeBot
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/root/RoseBladeBot/.venv/bin/python /root/RoseBladeBot/main.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
