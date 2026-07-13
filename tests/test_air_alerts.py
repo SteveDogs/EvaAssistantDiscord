@@ -29,6 +29,7 @@ from roseblade_bot.config import (
     ServerBannerConfig,
     SpecialDmConfig,
     SteamDigestConfig,
+    SteamProfileWatchConfig,
     WarMonitorConfig,
 )
 
@@ -86,6 +87,21 @@ def _build_config() -> BotConfig:
             timezone="Europe/Simferopol",
             top_count=15,
             include_support_stats=False,
+        ),
+        steam_profile_watch=SteamProfileWatchConfig(
+            enabled=False,
+            channel_ids=frozenset(),
+            allowed_role_ids=frozenset(),
+            targets=(),
+            api_key="",
+            poll_minutes=15,
+            user_cooldown_seconds=20,
+            announce_name_changes=True,
+            announce_avatar_changes=True,
+            announce_game_changes=True,
+            announce_level_changes=True,
+            announce_ban_changes=True,
+            announce_library_changes=True,
         ),
         banner=ServerBannerConfig(
             enabled=False,

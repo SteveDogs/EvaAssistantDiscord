@@ -21,6 +21,7 @@ from roseblade_bot.music import MusicService
 from roseblade_bot.pubg_lookup import PubgLookupService
 from roseblade_bot.server_banner import ServerBannerService
 from roseblade_bot.steam_digest import SteamDigestService
+from roseblade_bot.steam_profile_watch import SteamProfileWatchService
 from roseblade_bot.storage import JsonStateStore
 from roseblade_bot.war_monitor import WarMonitorService
 
@@ -32,6 +33,7 @@ class EvaSharedState:
     store: JsonStateStore
     pubg_lookup: PubgLookupService
     steam_digest: SteamDigestService
+    steam_profile_watch: SteamProfileWatchService
     server_banner: ServerBannerService
     air_alert: AirAlertService
     war_monitor: WarMonitorService
@@ -51,6 +53,7 @@ class EvaSharedState:
     _protected_voice_guard_recent: dict[tuple[int, int, int, int | None], datetime] = field(default_factory=dict)
     _protected_ban_startup_check_done: bool = False
     _server_banner_startup_refresh_done: bool = False
+    _steam_profile_watch_startup_sync_done: bool = False
     _air_alert_startup_refresh_done: bool = False
     _war_monitor_startup_sync_done: bool = False
 

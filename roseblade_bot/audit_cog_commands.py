@@ -117,6 +117,15 @@ class AuditCogCommandsMixin:
             f" support={_bool_label(self.config.steam.include_support_stats)}"
         )
         lines.append(
+            "Steam profiles:"
+            f" enabled={_bool_label(self.config.steam_profile_watch.enabled)},"
+            f" configured={_bool_label(self.steam_profile_watch.is_configured)},"
+            f" channels={self.steam_profile_watch.channel_count()},"
+            f" targets={self.steam_profile_watch.target_count()},"
+            f" roles={self.steam_profile_watch.allowed_role_count()},"
+            f" poll={self.config.steam_profile_watch.poll_minutes}m"
+        )
+        lines.append(
             "Server banner:"
             f" enabled={_bool_label(self.config.banner.enabled)},"
             f" interval={self.server_banner.schedule_label()},"

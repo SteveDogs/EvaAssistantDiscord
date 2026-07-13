@@ -85,6 +85,8 @@ class AuditCogRuntimeMixin:
     def _ensure_runtime_workers(self) -> None:
         if self.steam_digest.is_configured and not self.steam_digest_scheduler.is_running():
             self.steam_digest_scheduler.start()
+        if self.steam_profile_watch.is_configured and not self.steam_profile_watch_scheduler.is_running():
+            self.steam_profile_watch_scheduler.start()
         if self.server_banner.is_enabled and not self.server_banner_scheduler.is_running():
             self.server_banner_scheduler.start()
         if self.air_alert.is_configured and not self.air_alert_scheduler.is_running():
@@ -393,6 +395,8 @@ class AuditCogRuntimeMixin:
     def cog_unload(self) -> None:
         if self.steam_digest_scheduler.is_running():
             self.steam_digest_scheduler.cancel()
+        if self.steam_profile_watch_scheduler.is_running():
+            self.steam_profile_watch_scheduler.cancel()
         if self.server_banner_scheduler.is_running():
             self.server_banner_scheduler.cancel()
         if self.air_alert_scheduler.is_running():
@@ -432,6 +436,7 @@ class AuditCogRuntimeMixin:
                 await self.bootstrap_guild(guild)
             await self.run_startup_protected_ban_check()
             await self.run_startup_server_banner_refresh()
+            await self.run_startup_steam_profile_watch_sync()
             await self.run_startup_air_alert_refresh()
             await self.run_startup_war_monitor_sync()
             return
@@ -440,6 +445,7 @@ class AuditCogRuntimeMixin:
             await self.bootstrap_guild(guild)
         await self.run_startup_protected_ban_check()
         await self.run_startup_server_banner_refresh()
+        await self.run_startup_steam_profile_watch_sync()
         await self.run_startup_air_alert_refresh()
         await self.run_startup_war_monitor_sync()
 
@@ -694,6 +700,66 @@ class AuditCogRuntimeMixin:
             await self.refresh_guild_server_banner(guild, force=True, source="startup")
         self._server_banner_startup_refresh_done = True
 
+    def _resolve_steam_profile_watch_channel(self, channel_id: int) -> discord.TextChannel | discord.Thread | None:
+        cached = self.bot.get_channel(channel_id)
+        if isinstance(cached, (discord.TextChannel, discord.Thread)):
+            return cached
+
+        for guild in self.bot.guilds:
+            getter = getattr(guild, "get_channel_or_thread", None)
+            if callable(getter):
+                candidate = getter(channel_id)
+            else:
+                candidate = guild.get_channel(channel_id)
+                if candidate is None:
+                    thread_getter = getattr(guild, "get_thread", None)
+                    candidate = thread_getter(channel_id) if callable(thread_getter) else None
+            if isinstance(candidate, (discord.TextChannel, discord.Thread)):
+                return candidate
+        return None
+
+    def _configured_steam_profile_watch_channels_by_guild(self) -> dict[int, list[discord.TextChannel | discord.Thread]]:
+        channels_by_guild: dict[int, list[discord.TextChannel | discord.Thread]] = {}
+        for channel_id in sorted(self.config.steam_profile_watch.channel_ids):
+            channel = self._resolve_steam_profile_watch_channel(channel_id)
+            if channel is None:
+                continue
+            channels_by_guild.setdefault(channel.guild.id, []).append(channel)
+        return channels_by_guild
+
+    def _configured_steam_profile_watch_guild_ids(self) -> set[int]:
+        return set(self._configured_steam_profile_watch_channels_by_guild())
+
+    def _steam_profile_watch_state(self, guild_id: int) -> dict[str, Any]:
+        return self.store.get_service_state(guild_id, "steam_profile_watch")
+
+    async def run_startup_steam_profile_watch_sync(self) -> None:
+        if not self.steam_profile_watch.is_configured or self._steam_profile_watch_startup_sync_done:
+            return
+
+        channels_by_guild = self._configured_steam_profile_watch_channels_by_guild()
+        if not channels_by_guild:
+            return
+
+        try:
+            snapshots = await self.steam_profile_watch.fetch_all_snapshots()
+        except Exception as error:
+            print(f"Steam profile startup fetch failed: {error}")
+            return
+
+        now = discord.utils.utcnow().isoformat()
+        encoded = {
+            str(snapshot.steamid): self.steam_profile_watch.snapshot_to_state(snapshot)
+            for snapshot in snapshots
+        }
+        for guild_id in channels_by_guild:
+            state = self._steam_profile_watch_state(guild_id)
+            state["profiles"] = encoded
+            state["last_poll_at"] = now
+            state["last_error"] = None
+            self.store.set_service_state(guild_id, "steam_profile_watch", state)
+        self._steam_profile_watch_startup_sync_done = True
+
     async def run_startup_air_alert_refresh(self) -> None:
         if not self.air_alert.is_configured or self._air_alert_startup_refresh_done:
             return
@@ -727,6 +793,75 @@ class AuditCogRuntimeMixin:
     @server_banner_scheduler.error
     async def server_banner_scheduler_error(self, error: Exception) -> None:
         print(f"Server banner scheduler crashed: {error}")
+
+    @tasks.loop(minutes=1)
+    async def steam_profile_watch_scheduler(self) -> None:
+        if not self.steam_profile_watch.is_configured:
+            return
+
+        channels_by_guild = self._configured_steam_profile_watch_channels_by_guild()
+        if not channels_by_guild:
+            return
+
+        now = discord.utils.utcnow()
+        due_guild_ids: list[int] = []
+        for guild_id in channels_by_guild:
+            state = self._steam_profile_watch_state(guild_id)
+            last_polled = self._parse_state_datetime(state.get("last_poll_at"))
+            if last_polled is None or now - last_polled >= timedelta(minutes=self.config.steam_profile_watch.poll_minutes):
+                due_guild_ids.append(guild_id)
+
+        if not due_guild_ids:
+            return
+
+        try:
+            snapshots = await self.steam_profile_watch.fetch_all_snapshots()
+        except Exception as error:
+            print(f"Steam profile watch fetch failed: {error}")
+            for guild_id in due_guild_ids:
+                state = self._steam_profile_watch_state(guild_id)
+                state["last_poll_at"] = now.isoformat()
+                state["last_error"] = str(error)
+                self.store.set_service_state(guild_id, "steam_profile_watch", state)
+            return
+
+        encoded = {
+            str(snapshot.steamid): self.steam_profile_watch.snapshot_to_state(snapshot)
+            for snapshot in snapshots
+        }
+
+        for guild_id in due_guild_ids:
+            state = self._steam_profile_watch_state(guild_id)
+            previous_profiles = state.get("profiles")
+            if not isinstance(previous_profiles, dict):
+                previous_profiles = {}
+
+            for snapshot in snapshots:
+                previous = self.steam_profile_watch.snapshot_from_state(previous_profiles.get(str(snapshot.steamid)))
+                if previous is None:
+                    continue
+                changes = self.steam_profile_watch.describe_changes(previous, snapshot)
+                if not changes:
+                    continue
+                embed = self.steam_profile_watch.render_change_embed(previous, snapshot, changes=changes)
+                for channel in channels_by_guild.get(guild_id, []):
+                    try:
+                        await channel.send(embed=embed)
+                    except (discord.Forbidden, discord.HTTPException):
+                        continue
+
+            state["profiles"] = encoded
+            state["last_poll_at"] = now.isoformat()
+            state["last_error"] = None
+            self.store.set_service_state(guild_id, "steam_profile_watch", state)
+
+    @steam_profile_watch_scheduler.before_loop
+    async def before_steam_profile_watch_scheduler(self) -> None:
+        await self.bot.wait_until_ready()
+
+    @steam_profile_watch_scheduler.error
+    async def steam_profile_watch_scheduler_error(self, error: Exception) -> None:
+        print(f"Steam profile watch scheduler crashed: {error}")
 
     @tasks.loop(seconds=30)
     async def air_alert_scheduler(self) -> None:

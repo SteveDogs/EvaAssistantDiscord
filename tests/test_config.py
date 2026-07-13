@@ -23,6 +23,12 @@ class ConfigTests(unittest.TestCase):
                         "NICK_PREFIX_USER_RULES=380036631584833558=💅",
                         "PUBG_LOOKUP_ENABLED=true",
                         "PUBG_PLATFORM=steam",
+                        "STEAM_PROFILE_WATCH_ENABLED=true",
+                        "STEAM_PROFILE_WATCH_CHANNEL_IDS=1354908421811601520",
+                        "STEAM_PROFILE_WATCH_ALLOWED_ROLE_IDS=7;8",
+                        "STEAM_PROFILE_WATCH_TARGETS=76561199076106595=стив|steve|stevedogs",
+                        "STEAM_PROFILE_WATCH_POLL_MINUTES=15",
+                        "STEAM_PROFILE_WATCH_USER_COOLDOWN_SECONDS=25",
                         "SPECIAL_DM_ENABLED=true",
                         "SPECIAL_DM_USER_IDS=495309668986388520",
                         "SPECIAL_DM_EVENTS=voice_joined;avatar_changed",
@@ -72,6 +78,13 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.nickname_prefix.user_rules[380036631584833558], "💅")
             self.assertTrue(config.pubg.enabled)
             self.assertEqual(config.pubg.platform, "steam")
+            self.assertTrue(config.steam_profile_watch.enabled)
+            self.assertEqual(config.steam_profile_watch.channel_ids, frozenset({1354908421811601520}))
+            self.assertEqual(config.steam_profile_watch.allowed_role_ids, frozenset({7, 8}))
+            self.assertEqual(config.steam_profile_watch.targets[0].steamid, 76561199076106595)
+            self.assertEqual(config.steam_profile_watch.targets[0].aliases, ("стив", "steve", "stevedogs"))
+            self.assertEqual(config.steam_profile_watch.poll_minutes, 15)
+            self.assertEqual(config.steam_profile_watch.user_cooldown_seconds, 25)
             self.assertTrue(config.special_dm.enabled)
             self.assertEqual(config.special_dm.user_ids, frozenset({495309668986388520}))
             self.assertEqual(config.special_dm.events, frozenset({"voice_joined", "avatar_changed"}))

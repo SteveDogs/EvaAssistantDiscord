@@ -120,6 +120,29 @@ class SteamDigestConfig:
 
 
 @dataclass(slots=True)
+class SteamProfileWatchTarget:
+    steamid: int
+    aliases: tuple[str, ...]
+
+
+@dataclass(slots=True)
+class SteamProfileWatchConfig:
+    enabled: bool
+    channel_ids: frozenset[int]
+    allowed_role_ids: frozenset[int]
+    targets: tuple[SteamProfileWatchTarget, ...]
+    api_key: str
+    poll_minutes: int
+    user_cooldown_seconds: int
+    announce_name_changes: bool
+    announce_avatar_changes: bool
+    announce_game_changes: bool
+    announce_level_changes: bool
+    announce_ban_changes: bool
+    announce_library_changes: bool
+
+
+@dataclass(slots=True)
 class ServerBannerConfig:
     enabled: bool
     update_minutes: int
@@ -216,6 +239,18 @@ _LEGACY_ALIASES = {
     "steam_digest_timezone": "steam.timezone",
     "steam_digest_top_count": "steam.top_count",
     "steam_digest_include_support_stats": "steam.include_support_stats",
+    "steam_profile_watch_enabled": "steam_profile_watch.enabled",
+    "steam_profile_watch_channel_ids": "steam_profile_watch.channel_ids",
+    "steam_profile_watch_allowed_role_ids": "steam_profile_watch.allowed_role_ids",
+    "steam_profile_watch_targets": "steam_profile_watch.targets",
+    "steam_profile_watch_poll_minutes": "steam_profile_watch.poll_minutes",
+    "steam_profile_watch_user_cooldown_seconds": "steam_profile_watch.user_cooldown_seconds",
+    "steam_profile_watch_announce_name_changes": "steam_profile_watch.announce_name_changes",
+    "steam_profile_watch_announce_avatar_changes": "steam_profile_watch.announce_avatar_changes",
+    "steam_profile_watch_announce_game_changes": "steam_profile_watch.announce_game_changes",
+    "steam_profile_watch_announce_level_changes": "steam_profile_watch.announce_level_changes",
+    "steam_profile_watch_announce_ban_changes": "steam_profile_watch.announce_ban_changes",
+    "steam_profile_watch_announce_library_changes": "steam_profile_watch.announce_library_changes",
     "server_banner_enabled": "banner.enabled",
     "server_banner_update_minutes": "banner.update_minutes",
     "server_banner_title": "banner.title",
@@ -264,6 +299,7 @@ class BotConfig:
     special_dm: SpecialDmConfig
     pubg: PubgConfig
     steam: SteamDigestConfig
+    steam_profile_watch: SteamProfileWatchConfig
     banner: ServerBannerConfig
     air_alert: AirAlertConfig
     war_monitor: WarMonitorConfig
@@ -358,6 +394,38 @@ def _parse_string_set_env(name: str) -> frozenset[str]:
         if entry:
             values.add(entry)
     return frozenset(values)
+
+
+def _parse_steam_profile_targets_env(name: str) -> tuple[SteamProfileWatchTarget, ...]:
+    raw_value = os.getenv(name, "").strip()
+    if not raw_value:
+        return ()
+
+    targets: list[SteamProfileWatchTarget] = []
+    seen_ids: set[int] = set()
+    for chunk in re.split(r"[;,]", raw_value):
+        entry = chunk.strip()
+        if not entry:
+            continue
+
+        steamid_raw, aliases_raw = (entry.split("=", 1) + [""])[:2] if "=" in entry else (entry, "")
+        steamid = int(steamid_raw.strip())
+        if steamid in seen_ids:
+            continue
+
+        aliases: list[str] = []
+        if aliases_raw.strip():
+            for alias_chunk in aliases_raw.split("|"):
+                alias = alias_chunk.strip()
+                if alias and alias not in aliases:
+                    aliases.append(alias)
+        if not aliases:
+            aliases.append(str(steamid))
+
+        targets.append(SteamProfileWatchTarget(steamid=steamid, aliases=tuple(aliases)))
+        seen_ids.add(steamid)
+
+    return tuple(targets)
 
 
 def _parse_event_names_env(name: str, *, default: tuple[str, ...]) -> frozenset[str]:
@@ -460,6 +528,21 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
         top_count=min(25, max(5, _parse_int_env("STEAM_DIGEST_TOP_COUNT", default=15))),
         include_support_stats=_parse_bool_env("STEAM_DIGEST_INCLUDE_SUPPORT_STATS", default=True),
     )
+    steam_profile_watch_config = SteamProfileWatchConfig(
+        enabled=_parse_bool_env("STEAM_PROFILE_WATCH_ENABLED", default=False),
+        channel_ids=_parse_id_set_env("STEAM_PROFILE_WATCH_CHANNEL_IDS"),
+        allowed_role_ids=_parse_id_set_env("STEAM_PROFILE_WATCH_ALLOWED_ROLE_IDS"),
+        targets=_parse_steam_profile_targets_env("STEAM_PROFILE_WATCH_TARGETS"),
+        api_key=os.getenv("STEAM_API_KEY", "").strip(),
+        poll_minutes=max(5, _parse_int_env("STEAM_PROFILE_WATCH_POLL_MINUTES", default=15)),
+        user_cooldown_seconds=max(0, _parse_int_env("STEAM_PROFILE_WATCH_USER_COOLDOWN_SECONDS", default=20)),
+        announce_name_changes=_parse_bool_env("STEAM_PROFILE_WATCH_ANNOUNCE_NAME_CHANGES", default=True),
+        announce_avatar_changes=_parse_bool_env("STEAM_PROFILE_WATCH_ANNOUNCE_AVATAR_CHANGES", default=True),
+        announce_game_changes=_parse_bool_env("STEAM_PROFILE_WATCH_ANNOUNCE_GAME_CHANGES", default=True),
+        announce_level_changes=_parse_bool_env("STEAM_PROFILE_WATCH_ANNOUNCE_LEVEL_CHANGES", default=True),
+        announce_ban_changes=_parse_bool_env("STEAM_PROFILE_WATCH_ANNOUNCE_BAN_CHANGES", default=True),
+        announce_library_changes=_parse_bool_env("STEAM_PROFILE_WATCH_ANNOUNCE_LIBRARY_CHANGES", default=True),
+    )
     banner_config = ServerBannerConfig(
         enabled=_parse_bool_env("SERVER_BANNER_ENABLED", default=False),
         update_minutes=max(1, _parse_int_env("SERVER_BANNER_UPDATE_MINUTES", default=2)),
@@ -514,6 +597,7 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
         special_dm=special_dm_config,
         pubg=pubg_config,
         steam=steam_config,
+        steam_profile_watch=steam_profile_watch_config,
         banner=banner_config,
         air_alert=air_alert_config,
         war_monitor=war_monitor_config,
