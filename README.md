@@ -19,6 +19,7 @@
 - умеет автоматически ставить префиксы в ники по ролям
 - умеет иногда кокетливо троллить мат в чате вместо тупого наказания
 - умеет публиковать вечерний Steam-дайджест по расписанию
+- умеет следить за выбранными Steam-профилями и писать о сменах ника, аватарки, игры и Steam level
 - умеет обновлять live-баннер сервера с онлайном, войсом и boost-уровнем
 - умеет работать как музыкальный бот через Lavalink, YouTube Music и Spotify mirror
 - умеет работать с официальным API `alerts.in.ua` для карт и событий повітряних тривог
@@ -264,6 +265,18 @@ STEAM_DIGEST_MINUTE=0
 STEAM_DIGEST_TIMEZONE=Europe/Simferopol
 STEAM_DIGEST_TOP_COUNT=15
 STEAM_DIGEST_INCLUDE_SUPPORT_STATS=true
+STEAM_PROFILE_WATCH_ENABLED=true
+STEAM_PROFILE_WATCH_CHANNEL_IDS=1354908421811601520
+STEAM_PROFILE_WATCH_ALLOWED_ROLE_IDS=
+STEAM_PROFILE_WATCH_TARGETS=76561199076106595=стив|steve|stevedogs
+STEAM_PROFILE_WATCH_POLL_MINUTES=15
+STEAM_PROFILE_WATCH_USER_COOLDOWN_SECONDS=20
+STEAM_PROFILE_WATCH_ANNOUNCE_NAME_CHANGES=true
+STEAM_PROFILE_WATCH_ANNOUNCE_AVATAR_CHANGES=true
+STEAM_PROFILE_WATCH_ANNOUNCE_GAME_CHANGES=true
+STEAM_PROFILE_WATCH_ANNOUNCE_LEVEL_CHANGES=true
+STEAM_PROFILE_WATCH_ANNOUNCE_BAN_CHANGES=true
+STEAM_PROFILE_WATCH_ANNOUNCE_LIBRARY_CHANGES=true
 SERVER_BANNER_ENABLED=false
 SERVER_BANNER_UPDATE_MINUTES=2
 SERVER_BANNER_TITLE=ROSE BLADE
@@ -393,6 +406,58 @@ STEAM_DIGEST_INCLUDE_SUPPORT_STATS=true
 
 Даже если бот перезапустится позже `20:00`, EVA догонит пропущенный пост в этот же день и не задублирует его повторно после рестарта.
 Для ручной проверки без ожидания расписания используй `/steam_digest_now`.
+
+## Наблюдение За Steam-Профилем
+
+Если хочется, чтобы EVA следила за одним или несколькими Steam-профилями и писала о реальных изменениях в отдельный канал, включи блок:
+
+```env
+STEAM_PROFILE_WATCH_ENABLED=true
+STEAM_PROFILE_WATCH_CHANNEL_IDS=1354908421811601520
+STEAM_PROFILE_WATCH_ALLOWED_ROLE_IDS=
+STEAM_PROFILE_WATCH_TARGETS=76561199076106595=стив|steve|stevedogs
+STEAM_PROFILE_WATCH_POLL_MINUTES=15
+STEAM_PROFILE_WATCH_USER_COOLDOWN_SECONDS=20
+STEAM_PROFILE_WATCH_ANNOUNCE_NAME_CHANGES=true
+STEAM_PROFILE_WATCH_ANNOUNCE_AVATAR_CHANGES=true
+STEAM_PROFILE_WATCH_ANNOUNCE_GAME_CHANGES=true
+STEAM_PROFILE_WATCH_ANNOUNCE_LEVEL_CHANGES=true
+STEAM_PROFILE_WATCH_ANNOUNCE_BAN_CHANGES=true
+STEAM_PROFILE_WATCH_ANNOUNCE_LIBRARY_CHANGES=true
+STEAM_API_KEY=your_steam_api_key
+```
+
+Что умеет:
+
+- периодически опрашивает профиль по `SteamID64`
+- пишет в канал, если поменялся ник, аватар, текущая игра, Steam level, бан-статус или размер библиотеки
+- отвечает в этом же канале на сообщения вроде `Ева, а что там у стива?`
+- если в `STEAM_PROFILE_WATCH_ALLOWED_ROLE_IDS` указаны роли, отвечает только владельцу сервера и участникам с этими ролями
+
+Формат `STEAM_PROFILE_WATCH_TARGETS`:
+
+- `SteamID64=алиас|alias|nickname`
+- несколько профилей можно перечислять через `;`
+
+Например:
+
+```env
+STEAM_PROFILE_WATCH_TARGETS=76561199076106595=стив|steve|stevedogs;76561198000000000=булка|bulka
+```
+
+Что EVA реально берёт из Steam:
+
+- базовый профиль, ник, ссылка и аватар через `GetPlayerSummaries`
+- бан-статус через `GetPlayerBans`
+- Steam level через `GetSteamLevel`
+- недавние игры через `GetRecentlyPlayedGames`
+- размер библиотеки через `GetOwnedGames`, если Steam это не скрывает приватностью
+
+Что важно:
+
+- для этого режима нужен рабочий `STEAM_API_KEY`
+- при первом запуске EVA тихо сохранит текущий снимок профиля и начнёт писать только о следующих изменениях
+- если профиль скрыт, часть полей вроде библиотеки или recent games может не отдаться
 
 ## Live-баннер сервера
 
@@ -530,7 +595,7 @@ EVA умеет в отдельном чате отвечать на обраще
 
 - официальный FAQ PUBG прямо говорит, что PUBG API не умеет получать SteamID из IGN или наоборот
 - поэтому для обычной проверки по нику Steam-ключ не помогает
-- `STEAM_API_KEY` оставлен в конфиге на будущее, если позже захочется отдельный режим проверки по `steamid` или `steamcommunity.com/id/...`
+- `STEAM_API_KEY` теперь нужен не только как задел на будущее, но и для режима наблюдения за Steam-профилями
 
 Настройка:
 
@@ -730,6 +795,7 @@ roseblade_bot/
     http.py
   special_dm.py
   steam_digest.py
+  steam_profile_watch.py
   storage.py
   voice_guard.py
   voice_handlers.py
