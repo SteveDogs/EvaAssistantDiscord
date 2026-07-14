@@ -15,6 +15,7 @@ from roseblade_bot.cogs import EvaCommandsCog, EvaCoreCog, EvaEventsCog, EvaMusi
 from roseblade_bot.music import MusicService
 from roseblade_bot.pubg_lookup import PubgLookupService
 from roseblade_bot.server_banner import ServerBannerService
+from roseblade_bot.single_instance import SingleInstanceError, acquire_single_instance_lock
 from roseblade_bot.steam_digest import SteamDigestService
 from roseblade_bot.steam_profile_watch import SteamProfileWatchService
 from roseblade_bot.storage import JsonStateStore
@@ -68,5 +69,15 @@ def build_bot(config: BotConfig) -> commands.Bot:
 
 def main() -> None:
     config = load_config()
+    lock_path = config.discord.state_file.parent / "eva-assistant.lock"
+    try:
+        instance_lock = acquire_single_instance_lock(lock_path)
+    except SingleInstanceError as error:
+        print(f"[EVA] {error}")
+        raise SystemExit(1) from error
+
     bot = build_bot(config)
-    bot.run(config.discord.token)
+    try:
+        bot.run(config.discord.token)
+    finally:
+        instance_lock.release()

@@ -820,11 +820,14 @@ class AuditCogEventsMixin:
         if member.bot:
             return
 
+        if self.audit.was_recent(member.guild.id, "member_left", member.id, seconds=10):
+            return
         if self.audit.was_recent(member.guild.id, "member_kicked", member.id, seconds=10):
             return
         if self.audit.was_recent(member.guild.id, "member_banned", member.id, seconds=10):
             return
 
+        self.audit.remember_recent(member.guild.id, "member_left", member.id)
         await self.audit.send_event(
             member.guild,
             "member_left",
