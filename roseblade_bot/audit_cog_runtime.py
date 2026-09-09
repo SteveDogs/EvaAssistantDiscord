@@ -811,6 +811,10 @@ class AuditCogRuntimeMixin:
         else:
             for guild_id in channels_by_guild:
                 state = self._pubg_news_state(guild_id)
+                # Seed only a brand-new installation. Reconnects must preserve the
+                # delivery history so an interrupted restart cannot hide new posts.
+                if state.get("seen_keys"):
+                    continue
                 state["seen_keys"] = [post.key for post in posts][-80:]
                 state["last_poll_at"] = discord.utils.utcnow().isoformat()
                 state["last_error"] = " | ".join(errors) if errors else None

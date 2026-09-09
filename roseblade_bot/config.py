@@ -551,7 +551,7 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
         include_telegram=_parse_bool_env("PUBG_NEWS_INCLUDE_TELEGRAM", default=True),
         announce_on_startup=_parse_bool_env("PUBG_NEWS_ANNOUNCE_ON_STARTUP", default=False),
         max_posts_per_run=max(1, min(5, _parse_int_env("PUBG_NEWS_MAX_POSTS_PER_RUN", default=2))),
-        translation_max_characters=max(160, min(800, _parse_int_env("PUBG_NEWS_TRANSLATION_MAX_CHARACTERS", default=500))),
+        translation_max_characters=max(350, min(1_400, _parse_int_env("PUBG_NEWS_TRANSLATION_MAX_CHARACTERS", default=1_100))),
     )
     steam_config = SteamDigestConfig(
         enabled=_parse_bool_env("STEAM_DIGEST_ENABLED", default=False),

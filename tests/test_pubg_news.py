@@ -2,7 +2,7 @@ from types import SimpleNamespace
 import unittest
 
 from roseblade_bot.config import PubgNewsConfig
-from roseblade_bot.pubg_news import PubgNewsService
+from roseblade_bot.pubg_news import PubgNewsService, _OFFICIAL_BODY_RE
 
 
 def _service() -> PubgNewsService:
@@ -54,6 +54,16 @@ class PubgNewsTests(unittest.TestCase):
         self.assertEqual(len(posts), 1)
         self.assertEqual(posts[0].key, "official:11057")
         self.assertEqual(posts[0].url, "https://pubg.com/ru/news/11057")
+
+    def test_extracts_official_article_body(self) -> None:
+        html = (
+            '<div class="content-template__inner fr-view"><p>First useful paragraph.</p>'
+            '<p>Second useful paragraph.</p></div></div><div class="news-detail__banner">'
+        )
+        match = _OFFICIAL_BODY_RE.search(html)
+        self.assertIsNotNone(match)
+        assert match is not None
+        self.assertEqual(PubgNewsService._clean_html_text(match.group("body")), "First useful paragraph.\nSecond useful paragraph.")
 
 
 if __name__ == "__main__":
