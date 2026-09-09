@@ -2,7 +2,7 @@ from types import SimpleNamespace
 import unittest
 
 from roseblade_bot.config import PubgNewsConfig
-from roseblade_bot.pubg_news import PubgNewsService, _OFFICIAL_BODY_RE
+from roseblade_bot.pubg_news import PubgNewsService, _OFFICIAL_BODY_RE, _OfficialSectionParser
 
 
 def _service() -> PubgNewsService:
@@ -18,6 +18,8 @@ def _service() -> PubgNewsService:
                 announce_on_startup=False,
                 max_posts_per_run=2,
                 translation_max_characters=500,
+                max_series_parts=5,
+                analysis_review_hours=48,
             )
         )
     )
@@ -76,6 +78,19 @@ class PubgNewsTests(unittest.TestCase):
             PubgNewsService._localize_pubg_terms("PUBG x Magic Battle"),
             "PUBG x Магічна битва",
         )
+
+    def test_keeps_article_headings_and_bullets_as_sections(self) -> None:
+        parser = _OfficialSectionParser()
+        parser.feed(
+            "<p>Short overview.</p><h2>Weapon upgrades</h2><h3>Beryl M762</h3>"
+            "<p>Level 1: Base skin.</p><li>Level 10: Kill effect.</li>"
+            "<h2>Workshop</h2><p>15 attempts: delivery ticket.</p>"
+            "<h2>Shop</h2><p>Step 1: 700 G-Coin.</p>"
+        )
+        sections = _service()._select_sections(parser.finish())
+        self.assertEqual(len(sections), 4)
+        self.assertEqual(sections[1].title, "Weapon upgrades")
+        self.assertIn(("bullet", "Level 10: Kill effect."), _service()._section_entries(sections[1]))
 
 
 if __name__ == "__main__":

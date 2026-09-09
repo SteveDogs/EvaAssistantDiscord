@@ -21,6 +21,7 @@ from roseblade_bot.alert_intel import ThreatIntelHint
 from roseblade_bot.chat_banter import CHAT_BANTER
 from roseblade_bot.formatters import _display_name, _format_duration
 from roseblade_bot.server_banner import ServerBannerRenderResult
+from roseblade_bot.services.http import HttpRequestError
 from roseblade_bot.special_dm import SPECIAL_DM
 from roseblade_bot.voice_guard import VOICE_GUARD
 
@@ -843,9 +844,10 @@ class AuditCogRuntimeMixin:
             publish_errors: list[str] = []
             for post in candidates:
                 try:
-                    embed = await self.pubg_news.build_embed(post)
+                    embeds = await self.pubg_news.build_embeds(post)
                     for channel in channels:
-                        await channel.send(embed=embed)
+                        for embed in embeds:
+                            await channel.send(embed=embed)
                 except (discord.Forbidden, discord.HTTPException, OSError, ValueError) as error:
                     publish_errors.append(f"{post.key}: {error}")
                     continue
@@ -854,6 +856,18 @@ class AuditCogRuntimeMixin:
             state["seen_keys"] = sorted(seen_keys)[-80:]
             state["last_poll_at"] = discord.utils.utcnow().isoformat()
             state["last_error"] = " | ".join(publish_errors) if publish_errors else None
+            self.store.set_service_state(guild_id, "pubg_news", state)
+
+    async def review_pubg_news_structure(self, guild_ids: list[int], now: datetime) -> None:
+        """Re-check PUBG markup periodically without posting duplicate news."""
+        try:
+            report = await self.pubg_news.inspect_source_structure()
+        except (HttpRequestError, OSError, ValueError, RuntimeError) as error:
+            report = {"status": "review_failed", "error": str(error)}
+
+        for guild_id in guild_ids:
+            state = self._pubg_news_state(guild_id)
+            state["analysis_review"] = {**report, "checked_at": now.isoformat()}
             self.store.set_service_state(guild_id, "pubg_news", state)
 
     @tasks.loop(minutes=1)
@@ -866,6 +880,19 @@ class AuditCogRuntimeMixin:
             return
 
         now = discord.utils.utcnow()
+        review_due_guild_ids = [
+            guild_id
+            for guild_id in channels_by_guild
+            if (
+                last_review := self._parse_state_datetime(
+                    self._pubg_news_state(guild_id).get("analysis_review", {}).get("checked_at")
+                )
+            ) is None
+            or now - last_review >= timedelta(hours=self.config.pubg_news.analysis_review_hours)
+        ]
+        if review_due_guild_ids:
+            await self.review_pubg_news_structure(review_due_guild_ids, now)
+
         due_guild_ids = [
             guild_id
             for guild_id in channels_by_guild

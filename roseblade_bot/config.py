@@ -119,6 +119,8 @@ class PubgNewsConfig:
     announce_on_startup: bool
     max_posts_per_run: int
     translation_max_characters: int
+    max_series_parts: int
+    analysis_review_hours: int
 
 
 @dataclass(slots=True)
@@ -254,6 +256,8 @@ _LEGACY_ALIASES = {
     "pubg_news_announce_on_startup": "pubg_news.announce_on_startup",
     "pubg_news_max_posts_per_run": "pubg_news.max_posts_per_run",
     "pubg_news_translation_max_characters": "pubg_news.translation_max_characters",
+    "pubg_news_max_series_parts": "pubg_news.max_series_parts",
+    "pubg_news_analysis_review_hours": "pubg_news.analysis_review_hours",
     "steam_digest_enabled": "steam.enabled",
     "steam_digest_channel_ids": "steam.channel_ids",
     "steam_digest_hour": "steam.hour",
@@ -552,6 +556,8 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
         announce_on_startup=_parse_bool_env("PUBG_NEWS_ANNOUNCE_ON_STARTUP", default=False),
         max_posts_per_run=max(1, min(5, _parse_int_env("PUBG_NEWS_MAX_POSTS_PER_RUN", default=2))),
         translation_max_characters=max(350, min(1_400, _parse_int_env("PUBG_NEWS_TRANSLATION_MAX_CHARACTERS", default=1_100))),
+        max_series_parts=max(2, min(5, _parse_int_env("PUBG_NEWS_MAX_SERIES_PARTS", default=5))),
+        analysis_review_hours=max(24, min(168, _parse_int_env("PUBG_NEWS_ANALYSIS_REVIEW_HOURS", default=48))),
     )
     steam_config = SteamDigestConfig(
         enabled=_parse_bool_env("STEAM_DIGEST_ENABLED", default=False),
