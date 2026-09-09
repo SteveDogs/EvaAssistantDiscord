@@ -39,8 +39,13 @@ _TG_POST_RE = re.compile(
     re.IGNORECASE,
 )
 _TG_PHOTO_RE = re.compile(r"background-image:url\('(?P<url>[^']+)'\)", re.IGNORECASE)
+_OFFICIAL_BODY_RE = re.compile(
+    r'<div class="content-template__inner fr-view"[^>]*>(?P<body>[\s\S]*?)<div class="news-detail__banner"',
+    re.IGNORECASE,
+)
 _TAG_RE = re.compile(r"<[^>]+>")
 _BREAK_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
+_BLOCK_END_RE = re.compile(r"</(?:p|div|li|h[1-6]|tr|blockquote)\s*>", re.IGNORECASE)
 _SPACE_RE = re.compile(r"\s+")
 
 
@@ -218,32 +223,21 @@ class PubgNewsService:
         cached = self._translation_cache.get(cleaned)
         if cached is not None:
             return cached
-        try:
-            payload, _ = await fetch_json(
-                "https://translate.googleapis.com/translate_a/single",
-                params={"client": "gtx", "sl": "auto", "tl": "uk", "dt": "t", "q": cleaned},
-                headers={"User-Agent": "EVA Assistant PUBG News"},
-                timeout_total=20,
-            )
-        except (HttpRequestError, OSError, ValueError):
-            return cleaned
-        if not isinstance(payload, list) or not payload or not isinstance(payload[0], list):
-            return cleaned
-        chunks = [str(item[0]) for item in payload[0] if isinstance(item, list) and item and item[0]]
-        translated = "".join(chunks).strip() or cleaned
+        translated = await self._translate_with_google(cleaned)
+        if not translated:
+            translated = await self._translate_with_mymemory(cleaned)
+        translated = translated or cleaned
         self._translation_cache[cleaned] = translated
         return translated
 
     async def build_embed(self, post: PubgNewsPost) -> discord.Embed:
+        post = await self._expand_official_post(post)
         title = await self.translate_to_ukrainian(post.title)
         excerpt = await self.translate_to_ukrainian(post.excerpt)
         source_label = "Офіційний PUBG" if post.source == "official" else "@iBakhmetNews"
         embed = discord.Embed(
             title=f"🎮 {title or 'Новини PUBG'}",
-            description=(
-                "**Коротко українською:**\n"
-                f"{excerpt or 'Є нова публікація, відкрий оригінал для деталей.'}"
-            ),
+            description=excerpt or "Є нова публікація, відкрий оригінал для деталей.",
             colour=discord.Colour.orange(),
             url=post.url,
             timestamp=post.published_at,
@@ -254,6 +248,68 @@ class PubgNewsService:
             embed.set_image(url=post.image_url)
         embed.set_footer(text=f"{EMBED_FOOTER} • PUBG news")
         return embed
+
+    async def _expand_official_post(self, post: PubgNewsPost) -> PubgNewsPost:
+        if post.source != "official":
+            return post
+        try:
+            html = await self._fetch_html(post.url)
+        except (HttpRequestError, OSError, ValueError):
+            return post
+        body_match = _OFFICIAL_BODY_RE.search(html)
+        if body_match is None:
+            return post
+        body = self._clean_html_text(body_match.group("body"))
+        if len(body) <= len(post.excerpt):
+            return post
+        return PubgNewsPost(
+            source=post.source,
+            post_id=post.post_id,
+            title=post.title,
+            excerpt=body,
+            url=post.url,
+            image_url=post.image_url,
+            published_at=post.published_at,
+        )
+
+    async def _translate_with_google(self, text: str) -> str | None:
+        for attempt in range(2):
+            try:
+                payload, _ = await fetch_json(
+                    "https://translate.googleapis.com/translate_a/single",
+                    params={"client": "gtx", "sl": "auto", "tl": "uk", "dt": "t", "q": text},
+                    headers={"User-Agent": "EVA Assistant PUBG News"},
+                    timeout_total=20,
+                )
+            except (HttpRequestError, OSError, ValueError):
+                if attempt == 0:
+                    await asyncio.sleep(1)
+                continue
+            if isinstance(payload, list) and payload and isinstance(payload[0], list):
+                chunks = [str(item[0]) for item in payload[0] if isinstance(item, list) and item and item[0]]
+                translated = "".join(chunks).strip()
+                if translated:
+                    return translated
+        return None
+
+    async def _translate_with_mymemory(self, text: str) -> str | None:
+        source_language = "ru" if re.search(r"[А-Яа-яЁё]", text) else "en"
+        try:
+            payload, _ = await fetch_json(
+                "https://api.mymemory.translated.net/get",
+                params={"q": text, "langpair": f"{source_language}|uk"},
+                headers={"User-Agent": "EVA Assistant PUBG News"},
+                timeout_total=20,
+            )
+        except (HttpRequestError, OSError, ValueError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+        response = payload.get("responseData")
+        if not isinstance(response, dict):
+            return None
+        translated = str(response.get("translatedText") or "").strip()
+        return translated or None
 
     @staticmethod
     def _meta_content(html: str, wanted_name: str) -> str | None:
@@ -269,6 +325,7 @@ class PubgNewsService:
     @staticmethod
     def _clean_html_text(raw_html: str) -> str:
         text = _BREAK_RE.sub("\n", raw_html)
+        text = _BLOCK_END_RE.sub("\n", text)
         text = _TAG_RE.sub("", text)
         return unescape(text).strip()
 

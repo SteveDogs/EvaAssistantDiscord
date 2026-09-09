@@ -616,7 +616,7 @@ STEAM_API_KEY=your_steam_api_key
 ## Новини PUBG Українською
 
 EVA може стежити за офіційними новинами PUBG та публічним каналом `@iBakhmetNews` у заданий Discord-канал.
-Вона бере обкладинку, перекладає назву й короткий виклад українською, а повний матеріал залишає за посиланням на джерело.
+Вона бере обкладинку, перекладає назву й змістовний фрагмент статті українською, а повний матеріал залишає за посиланням на джерело.
 
 ```env
 PUBG_NEWS_ENABLED=true
@@ -627,7 +627,7 @@ PUBG_NEWS_TELEGRAM_USERNAME=iBakhmetNews
 PUBG_NEWS_INCLUDE_TELEGRAM=true
 PUBG_NEWS_ANNOUNCE_ON_STARTUP=false
 PUBG_NEWS_MAX_POSTS_PER_RUN=2
-PUBG_NEWS_TRANSLATION_MAX_CHARACTERS=500
+PUBG_NEWS_TRANSLATION_MAX_CHARACTERS=1100
 ```
 
 - официальный PUBG является основным источником; Telegram можно выключить через `PUBG_NEWS_INCLUDE_TELEGRAM=false`
@@ -635,7 +635,7 @@ PUBG_NEWS_TRANSLATION_MAX_CHARACTERS=500
 - если бот долго не работал, за один проход выйдет не больше `PUBG_NEWS_MAX_POSTS_PER_RUN` свежих публикаций
 - для ручной проверки используй `/pubg_news_now` в нужном канале
 
-Полные переводы чужих материалов EVA не копирует: в Discord выходит короткий украинский виклад и кликабельная ссылка на оригинал.
+Полные переводы чужих материалов EVA не копирует: в Discord выходит содержательный украинский виклад и кликабельная ссылка на оригинал.
 
 Что важно по лимитам:
 
