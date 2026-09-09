@@ -87,6 +87,8 @@ class AuditCogRuntimeMixin:
             self.steam_digest_scheduler.start()
         if self.steam_profile_watch.is_configured and not self.steam_profile_watch_scheduler.is_running():
             self.steam_profile_watch_scheduler.start()
+        if self.pubg_news.is_configured and not self.pubg_news_scheduler.is_running():
+            self.pubg_news_scheduler.start()
         if self.server_banner.is_enabled and not self.server_banner_scheduler.is_running():
             self.server_banner_scheduler.start()
         if self.air_alert.is_configured and not self.air_alert_scheduler.is_running():
@@ -397,6 +399,8 @@ class AuditCogRuntimeMixin:
             self.steam_digest_scheduler.cancel()
         if self.steam_profile_watch_scheduler.is_running():
             self.steam_profile_watch_scheduler.cancel()
+        if self.pubg_news_scheduler.is_running():
+            self.pubg_news_scheduler.cancel()
         if self.server_banner_scheduler.is_running():
             self.server_banner_scheduler.cancel()
         if self.air_alert_scheduler.is_running():
@@ -437,6 +441,7 @@ class AuditCogRuntimeMixin:
             await self.run_startup_protected_ban_check()
             await self.run_startup_server_banner_refresh()
             await self.run_startup_steam_profile_watch_sync()
+            await self.run_startup_pubg_news_sync()
             await self.run_startup_air_alert_refresh()
             await self.run_startup_war_monitor_sync()
             return
@@ -446,6 +451,7 @@ class AuditCogRuntimeMixin:
         await self.run_startup_protected_ban_check()
         await self.run_startup_server_banner_refresh()
         await self.run_startup_steam_profile_watch_sync()
+        await self.run_startup_pubg_news_sync()
         await self.run_startup_air_alert_refresh()
         await self.run_startup_war_monitor_sync()
 
@@ -759,6 +765,129 @@ class AuditCogRuntimeMixin:
             state["last_error"] = None
             self.store.set_service_state(guild_id, "steam_profile_watch", state)
         self._steam_profile_watch_startup_sync_done = True
+
+    def _resolve_pubg_news_channel(self, channel_id: int) -> discord.TextChannel | discord.Thread | None:
+        cached = self.bot.get_channel(channel_id)
+        if isinstance(cached, (discord.TextChannel, discord.Thread)):
+            return cached
+
+        for guild in self.bot.guilds:
+            get_channel_or_thread = getattr(guild, "get_channel_or_thread", None)
+            candidate = (
+                get_channel_or_thread(channel_id)
+                if callable(get_channel_or_thread)
+                else guild.get_channel(channel_id)
+            )
+            if isinstance(candidate, (discord.TextChannel, discord.Thread)):
+                return candidate
+        return None
+
+    def _configured_pubg_news_channels_by_guild(self) -> dict[int, list[discord.TextChannel | discord.Thread]]:
+        channels_by_guild: dict[int, list[discord.TextChannel | discord.Thread]] = {}
+        for channel_id in sorted(self.config.pubg_news.channel_ids):
+            channel = self._resolve_pubg_news_channel(channel_id)
+            if channel is not None:
+                channels_by_guild.setdefault(channel.guild.id, []).append(channel)
+        return channels_by_guild
+
+    def _pubg_news_state(self, guild_id: int) -> dict[str, Any]:
+        return self.store.get_service_state(guild_id, "pubg_news")
+
+    async def run_startup_pubg_news_sync(self) -> None:
+        if not self.pubg_news.is_configured or self._pubg_news_startup_sync_done:
+            return
+
+        channels_by_guild = self._configured_pubg_news_channels_by_guild()
+        if not channels_by_guild:
+            return
+
+        posts, errors = await self.pubg_news.fetch_recent_posts()
+        if not posts:
+            print(f"PUBG news startup fetch failed: {' | '.join(errors) or 'no readable posts'}")
+            return
+
+        if self.config.pubg_news.announce_on_startup:
+            await self.dispatch_pubg_news_posts(posts)
+        else:
+            for guild_id in channels_by_guild:
+                state = self._pubg_news_state(guild_id)
+                state["seen_keys"] = [post.key for post in posts][-80:]
+                state["last_poll_at"] = discord.utils.utcnow().isoformat()
+                state["last_error"] = " | ".join(errors) if errors else None
+                self.store.set_service_state(guild_id, "pubg_news", state)
+
+        self._pubg_news_startup_sync_done = True
+
+    async def dispatch_pubg_news_posts(self, posts) -> None:
+        channels_by_guild = self._configured_pubg_news_channels_by_guild()
+        if not channels_by_guild or not posts:
+            return
+
+        for guild_id, channels in channels_by_guild.items():
+            state = self._pubg_news_state(guild_id)
+            seen_keys = {str(value) for value in state.get("seen_keys", []) if str(value)}
+            unseen = [post for post in posts if post.key not in seen_keys]
+            if not unseen:
+                state["last_poll_at"] = discord.utils.utcnow().isoformat()
+                self.store.set_service_state(guild_id, "pubg_news", state)
+                continue
+
+            # A long outage must not turn into a wall of old announcements.
+            skipped = unseen[: -self.config.pubg_news.max_posts_per_run]
+            candidates = unseen[-self.config.pubg_news.max_posts_per_run :]
+            seen_keys.update(post.key for post in skipped)
+            publish_errors: list[str] = []
+            for post in candidates:
+                try:
+                    embed = await self.pubg_news.build_embed(post)
+                    for channel in channels:
+                        await channel.send(embed=embed)
+                except (discord.Forbidden, discord.HTTPException, OSError, ValueError) as error:
+                    publish_errors.append(f"{post.key}: {error}")
+                    continue
+                seen_keys.add(post.key)
+
+            state["seen_keys"] = sorted(seen_keys)[-80:]
+            state["last_poll_at"] = discord.utils.utcnow().isoformat()
+            state["last_error"] = " | ".join(publish_errors) if publish_errors else None
+            self.store.set_service_state(guild_id, "pubg_news", state)
+
+    @tasks.loop(minutes=1)
+    async def pubg_news_scheduler(self) -> None:
+        if not self.pubg_news.is_configured:
+            return
+
+        channels_by_guild = self._configured_pubg_news_channels_by_guild()
+        if not channels_by_guild:
+            return
+
+        now = discord.utils.utcnow()
+        due_guild_ids = [
+            guild_id
+            for guild_id in channels_by_guild
+            if (last_poll := self._parse_state_datetime(self._pubg_news_state(guild_id).get("last_poll_at"))) is None
+            or now - last_poll >= timedelta(minutes=self.config.pubg_news.poll_minutes)
+        ]
+        if not due_guild_ids:
+            return
+
+        posts, errors = await self.pubg_news.fetch_recent_posts()
+        if not posts:
+            for guild_id in due_guild_ids:
+                state = self._pubg_news_state(guild_id)
+                state["last_poll_at"] = now.isoformat()
+                state["last_error"] = " | ".join(errors) or "no readable posts"
+                self.store.set_service_state(guild_id, "pubg_news", state)
+            return
+        await self.dispatch_pubg_news_posts(posts)
+
+    @pubg_news_scheduler.before_loop
+    async def before_pubg_news_scheduler(self) -> None:
+        await self.bot.wait_until_ready()
+
+    @pubg_news_scheduler.error
+    async def pubg_news_scheduler_error(self, error: Exception) -> None:
+        print(f"PUBG news scheduler crashed: {error}")
 
     async def run_startup_air_alert_refresh(self) -> None:
         if not self.air_alert.is_configured or self._air_alert_startup_refresh_done:

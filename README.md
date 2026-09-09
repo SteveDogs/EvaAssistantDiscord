@@ -84,6 +84,7 @@ EVA умеет раз в день публиковать небольшой Stea
 Для теста без ожидания вечера есть slash-команда:
 
 - `/steam_digest_now`
+- `/pubg_news_now`
 
 ### Живой баннер сервера
 
@@ -611,6 +612,30 @@ PUBG_LOOKUP_USER_COOLDOWN_SECONDS=20
 PUBG_API_KEY=your_pubg_api_key
 STEAM_API_KEY=your_steam_api_key
 ```
+
+## Новини PUBG Українською
+
+EVA може стежити за офіційними новинами PUBG та публічним каналом `@iBakhmetNews` у заданий Discord-канал.
+Вона бере обкладинку, перекладає назву й короткий виклад українською, а повний матеріал залишає за посиланням на джерело.
+
+```env
+PUBG_NEWS_ENABLED=true
+PUBG_NEWS_CHANNEL_IDS=1398263697893359749
+PUBG_NEWS_POLL_MINUTES=30
+PUBG_NEWS_OFFICIAL_URL=https://pubg.com/ru/news
+PUBG_NEWS_TELEGRAM_USERNAME=iBakhmetNews
+PUBG_NEWS_INCLUDE_TELEGRAM=true
+PUBG_NEWS_ANNOUNCE_ON_STARTUP=false
+PUBG_NEWS_MAX_POSTS_PER_RUN=2
+PUBG_NEWS_TRANSLATION_MAX_CHARACTERS=500
+```
+
+- официальный PUBG является основным источником; Telegram можно выключить через `PUBG_NEWS_INCLUDE_TELEGRAM=false`
+- при первом запуске EVA тихо запоминает уже существующие посты и публикует только следующие
+- если бот долго не работал, за один проход выйдет не больше `PUBG_NEWS_MAX_POSTS_PER_RUN` свежих публикаций
+- для ручной проверки используй `/pubg_news_now` в нужном канале
+
+Полные переводы чужих материалов EVA не копирует: в Discord выходит короткий украинский виклад и кликабельная ссылка на оригинал.
 
 Что важно по лимитам:
 

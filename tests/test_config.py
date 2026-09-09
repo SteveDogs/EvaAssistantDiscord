@@ -23,6 +23,10 @@ class ConfigTests(unittest.TestCase):
                         "NICK_PREFIX_USER_RULES=380036631584833558=💅",
                         "PUBG_LOOKUP_ENABLED=true",
                         "PUBG_PLATFORM=steam",
+                        "PUBG_NEWS_ENABLED=true",
+                        "PUBG_NEWS_CHANNEL_IDS=1398263697893359749",
+                        "PUBG_NEWS_POLL_MINUTES=25",
+                        "PUBG_NEWS_TELEGRAM_USERNAME=iBakhmetNews",
                         "STEAM_PROFILE_WATCH_ENABLED=true",
                         "STEAM_PROFILE_WATCH_CHANNEL_IDS=1354908421811601520",
                         "STEAM_PROFILE_WATCH_ALLOWED_ROLE_IDS=7;8",
@@ -78,6 +82,10 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.nickname_prefix.user_rules[380036631584833558], "💅")
             self.assertTrue(config.pubg.enabled)
             self.assertEqual(config.pubg.platform, "steam")
+            self.assertTrue(config.pubg_news.enabled)
+            self.assertEqual(config.pubg_news.channel_ids, frozenset({1398263697893359749}))
+            self.assertEqual(config.pubg_news.poll_minutes, 25)
+            self.assertEqual(config.pubg_news.telegram_username, "iBakhmetNews")
             self.assertTrue(config.steam_profile_watch.enabled)
             self.assertEqual(config.steam_profile_watch.channel_ids, frozenset({1354908421811601520}))
             self.assertEqual(config.steam_profile_watch.allowed_role_ids, frozenset({7, 8}))
