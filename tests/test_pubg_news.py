@@ -65,6 +65,18 @@ class PubgNewsTests(unittest.TestCase):
         assert match is not None
         self.assertEqual(PubgNewsService._clean_html_text(match.group("body")), "First useful paragraph.\nSecond useful paragraph.")
 
+    def test_splits_long_translation_into_safe_parts(self) -> None:
+        text = "Перше речення. " + "друге слово " * 90 + "Кінець."
+        parts = PubgNewsService._translation_parts(text)
+        self.assertGreater(len(parts), 1)
+        self.assertTrue(all(len(part) <= 450 for part in parts))
+
+    def test_localizes_magic_battle_title(self) -> None:
+        self.assertEqual(
+            PubgNewsService._localize_pubg_terms("PUBG x Magic Battle"),
+            "PUBG x Магічна битва",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
