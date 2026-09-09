@@ -223,10 +223,14 @@ class PubgNewsService:
         cached = self._translation_cache.get(cleaned)
         if cached is not None:
             return cached
-        translated = await self._translate_with_google(cleaned)
-        if not translated:
-            translated = await self._translate_with_mymemory(cleaned)
-        translated = translated or cleaned
+        translated_parts: list[str] = []
+        for part in self._translation_parts(cleaned):
+            translated = await self._translate_with_google(part)
+            if not translated:
+                translated = await self._translate_with_mymemory(part)
+            translated_parts.append(translated or part)
+
+        translated = self._localize_pubg_terms(" ".join(translated_parts))
         self._translation_cache[cleaned] = translated
         return translated
 
@@ -288,7 +292,7 @@ class PubgNewsService:
             if isinstance(payload, list) and payload and isinstance(payload[0], list):
                 chunks = [str(item[0]) for item in payload[0] if isinstance(item, list) and item and item[0]]
                 translated = "".join(chunks).strip()
-                if translated:
+                if translated and "QUERY LENGTH LIMIT EXCEEDED" not in translated.upper():
                     return translated
         return None
 
@@ -346,6 +350,37 @@ class PubgNewsService:
         cut = normalized.rfind(" ", 0, limit - 1)
         minimum_word_cut = max(12, limit // 3)
         return normalized[: cut if cut >= minimum_word_cut else limit - 1].rstrip() + "…"
+
+    @staticmethod
+    def _translation_parts(text: str, limit: int = 450) -> list[str]:
+        normalized = _SPACE_RE.sub(" ", text).strip()
+        if len(normalized) <= limit:
+            return [normalized] if normalized else []
+
+        parts: list[str] = []
+        remaining = normalized
+        while remaining:
+            if len(remaining) <= limit:
+                parts.append(remaining)
+                break
+            sentence_cut = max(remaining.rfind(mark, 0, limit) for mark in ".!?;:")
+            word_cut = remaining.rfind(" ", 0, limit)
+            cut = sentence_cut if sentence_cut >= limit // 2 else word_cut
+            if cut < limit // 3:
+                cut = limit
+            parts.append(remaining[:cut].strip())
+            remaining = remaining[cut:].lstrip(" .!?;:")
+        return [part for part in parts if part]
+
+    @staticmethod
+    def _localize_pubg_terms(text: str) -> str:
+        localized = re.sub(
+            r"PUBG\s*x\s*(?:Magic Battle|Jujutsu Kaisen|Магическая битва)",
+            "PUBG x Магічна битва",
+            text,
+            flags=re.IGNORECASE,
+        )
+        return localized
 
     @staticmethod
     def _looks_ukrainian(text: str) -> bool:
