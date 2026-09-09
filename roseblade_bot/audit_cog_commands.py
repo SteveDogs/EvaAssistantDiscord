@@ -45,6 +45,7 @@ class AuditCogCommandsMixin:
         nickname_state = self._nickname_prefix_state(interaction.guild.id)
         protected_bans_state = self._protected_bans_state(interaction.guild.id)
         server_banner_state = self._server_banner_state(interaction.guild.id)
+        pubg_news_state = self._pubg_news_state(interaction.guild.id)
 
         lines = [f"Категория ID: `{saved.get('category_id')}`"]
         for key, definition in CHANNEL_DEFINITIONS.items():
@@ -106,6 +107,15 @@ class AuditCogCommandsMixin:
             f" ranked={_bool_label(self.config.pubg.include_ranked)},"
             f" lifetime={_bool_label(self.config.pubg.include_lifetime_stats)},"
             f" steam_key={_bool_label(self.pubg_lookup.has_steam_key())}"
+        )
+        lines.append(
+            "PUBG news:"
+            f" enabled={_bool_label(self.config.pubg_news.enabled)},"
+            f" configured={_bool_label(self.pubg_news.is_configured)},"
+            f" channels={self.pubg_news.channel_count()},"
+            f" schedule={self.pubg_news.schedule_label()},"
+            f" telegram={_bool_label(self.config.pubg_news.include_telegram)},"
+            f" last_error={pubg_news_state.get('last_error', 'n/a') or 'n/a'}"
         )
         lines.append(
             "Steam digest:"
@@ -303,6 +313,44 @@ class AuditCogCommandsMixin:
             return
 
         await interaction.followup.send("Тестовый Steam-дайджест отправлен в этот канал.", ephemeral=True)
+
+    @app_commands.command(name="pubg_news_now", description="Отправить свежие новости PUBG в текущий канал")
+    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.guild_only()
+    async def pubg_news_now(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        if not self.pubg_news.is_configured:
+            await interaction.followup.send(
+                "Новости PUBG выключены или для них не задан канал в конфиге.",
+                ephemeral=True,
+            )
+            return
+
+        channel = interaction.channel
+        if channel is None or not isinstance(channel, (discord.TextChannel, discord.Thread)):
+            await interaction.followup.send("Нужен обычный текстовый канал или ветка.", ephemeral=True)
+            return
+
+        try:
+            posts, errors = await self.pubg_news.fetch_recent_posts()
+            if not posts:
+                await interaction.followup.send(
+                    f"Не смогла получить новости PUBG: {' | '.join(errors) or 'источники ничего не отдали'}",
+                    ephemeral=True,
+                )
+                return
+            selected = posts[-self.config.pubg_news.max_posts_per_run :]
+            for post in selected:
+                await channel.send(embed=await self.pubg_news.build_embed(post))
+        except (discord.Forbidden, discord.HTTPException) as error:
+            await interaction.followup.send(f"Не смогла отправить новость: {error}", ephemeral=True)
+            return
+        except Exception as error:
+            await interaction.followup.send(f"Не смогла собрать новости PUBG: {error}", ephemeral=True)
+            return
+
+        source_note = f" Не ответили: {' | '.join(errors)}" if errors else ""
+        await interaction.followup.send(f"Отправила свежие новости PUBG.{source_note}", ephemeral=True)
 
     @app_commands.command(name="air_alert_now", description="Отправить текущую карту повітряних тривог в этот канал")
     @app_commands.checks.has_permissions(administrator=True)

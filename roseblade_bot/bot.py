@@ -14,6 +14,7 @@ from roseblade_bot.config import BotConfig, load_config
 from roseblade_bot.cogs import EvaCommandsCog, EvaCoreCog, EvaEventsCog, EvaMusicCog, EvaSharedState
 from roseblade_bot.music import MusicService
 from roseblade_bot.pubg_lookup import PubgLookupService
+from roseblade_bot.pubg_news import PubgNewsService
 from roseblade_bot.server_banner import ServerBannerService
 from roseblade_bot.single_instance import SingleInstanceError, acquire_single_instance_lock
 from roseblade_bot.steam_digest import SteamDigestService
@@ -37,6 +38,7 @@ def build_bot(config: BotConfig) -> commands.Bot:
         config=config,
         store=store,
         pubg_lookup=PubgLookupService(config),
+        pubg_news=PubgNewsService(config),
         steam_digest=SteamDigestService(config),
         steam_profile_watch=SteamProfileWatchService(config),
         server_banner=ServerBannerService(config),

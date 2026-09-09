@@ -109,6 +109,19 @@ class PubgConfig:
 
 
 @dataclass(slots=True)
+class PubgNewsConfig:
+    enabled: bool
+    channel_ids: frozenset[int]
+    poll_minutes: int
+    official_news_url: str
+    telegram_username: str
+    include_telegram: bool
+    announce_on_startup: bool
+    max_posts_per_run: int
+    translation_max_characters: int
+
+
+@dataclass(slots=True)
 class SteamDigestConfig:
     enabled: bool
     channel_ids: frozenset[int]
@@ -232,6 +245,15 @@ _LEGACY_ALIASES = {
     "pubg_lookup_include_lifetime_stats": "pubg.include_lifetime_stats",
     "pubg_lookup_cache_ttl_seconds": "pubg.cache_ttl_seconds",
     "pubg_lookup_user_cooldown_seconds": "pubg.user_cooldown_seconds",
+    "pubg_news_enabled": "pubg_news.enabled",
+    "pubg_news_channel_ids": "pubg_news.channel_ids",
+    "pubg_news_poll_minutes": "pubg_news.poll_minutes",
+    "pubg_news_official_url": "pubg_news.official_news_url",
+    "pubg_news_telegram_username": "pubg_news.telegram_username",
+    "pubg_news_include_telegram": "pubg_news.include_telegram",
+    "pubg_news_announce_on_startup": "pubg_news.announce_on_startup",
+    "pubg_news_max_posts_per_run": "pubg_news.max_posts_per_run",
+    "pubg_news_translation_max_characters": "pubg_news.translation_max_characters",
     "steam_digest_enabled": "steam.enabled",
     "steam_digest_channel_ids": "steam.channel_ids",
     "steam_digest_hour": "steam.hour",
@@ -298,6 +320,7 @@ class BotConfig:
     chat_banter: ChatBanterConfig
     special_dm: SpecialDmConfig
     pubg: PubgConfig
+    pubg_news: PubgNewsConfig
     steam: SteamDigestConfig
     steam_profile_watch: SteamProfileWatchConfig
     banner: ServerBannerConfig
@@ -519,6 +542,17 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
         cache_ttl_seconds=max(60, _parse_int_env("PUBG_LOOKUP_CACHE_TTL_SECONDS", default=900)),
         user_cooldown_seconds=max(0, _parse_int_env("PUBG_LOOKUP_USER_COOLDOWN_SECONDS", default=20)),
     )
+    pubg_news_config = PubgNewsConfig(
+        enabled=_parse_bool_env("PUBG_NEWS_ENABLED", default=False),
+        channel_ids=_parse_id_set_env("PUBG_NEWS_CHANNEL_IDS"),
+        poll_minutes=max(10, _parse_int_env("PUBG_NEWS_POLL_MINUTES", default=30)),
+        official_news_url=(os.getenv("PUBG_NEWS_OFFICIAL_URL", "https://pubg.com/ru/news").strip() or "https://pubg.com/ru/news"),
+        telegram_username=(os.getenv("PUBG_NEWS_TELEGRAM_USERNAME", "iBakhmetNews").strip().lstrip("@") or "iBakhmetNews"),
+        include_telegram=_parse_bool_env("PUBG_NEWS_INCLUDE_TELEGRAM", default=True),
+        announce_on_startup=_parse_bool_env("PUBG_NEWS_ANNOUNCE_ON_STARTUP", default=False),
+        max_posts_per_run=max(1, min(5, _parse_int_env("PUBG_NEWS_MAX_POSTS_PER_RUN", default=2))),
+        translation_max_characters=max(160, min(800, _parse_int_env("PUBG_NEWS_TRANSLATION_MAX_CHARACTERS", default=500))),
+    )
     steam_config = SteamDigestConfig(
         enabled=_parse_bool_env("STEAM_DIGEST_ENABLED", default=False),
         channel_ids=_parse_id_set_env("STEAM_DIGEST_CHANNEL_IDS"),
@@ -596,6 +630,7 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
         chat_banter=chat_banter_config,
         special_dm=special_dm_config,
         pubg=pubg_config,
+        pubg_news=pubg_news_config,
         steam=steam_config,
         steam_profile_watch=steam_profile_watch_config,
         banner=banner_config,
