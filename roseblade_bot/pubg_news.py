@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from html import unescape
 import re
 from typing import Any
@@ -47,6 +48,19 @@ _TAG_RE = re.compile(r"<[^>]+>")
 _BREAK_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
 _BLOCK_END_RE = re.compile(r"</(?:p|div|li|h[1-6]|tr|blockquote)\s*>", re.IGNORECASE)
 _SPACE_RE = re.compile(r"\s+")
+_PUBG_SECTION_PRIORITY = re.compile(r"магазин|g-coin|стоим|мастер|улучш|оруж|укрыт|событ|мисси|срок|награ", re.IGNORECASE)
+_ARTICLE_PROFILE_PATTERNS = {
+    "collaboration": re.compile(r"коллаборац|сотруднич|magic battle|jujutsu|магическ.*битв", re.IGNORECASE),
+    "patch": re.compile(r"обновлени|patch|баланс|исправлен", re.IGNORECASE),
+    "store": re.compile(r"магазин|g-coin|распродаж|набор", re.IGNORECASE),
+    "event": re.compile(r"событи|мисси|награда|турнир", re.IGNORECASE),
+}
+_PROFILE_SECTION_PATTERNS = {
+    "collaboration": re.compile(r"мир|укрыт|мастерск|магазин|событ", re.IGNORECASE),
+    "patch": re.compile(r"карт|игров|оруж|баланс|исправ|производ", re.IGNORECASE),
+    "store": re.compile(r"набор|предмет|цен|g-coin|срок", re.IGNORECASE),
+    "event": re.compile(r"как участвовать|мисси|награда|срок|правил", re.IGNORECASE),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +76,58 @@ class PubgNewsPost:
     @property
     def key(self) -> str:
         return f"{self.source}:{self.post_id}"
+
+
+@dataclass(slots=True)
+class PubgNewsSection:
+    title: str
+    entries: list[tuple[str, str]]
+    order: int
+
+
+class _OfficialSectionParser(HTMLParser):
+    """Keeps headings and list items so large PUBG articles remain readable."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.sections: list[PubgNewsSection] = []
+        self._current = PubgNewsSection(title="Головне", entries=[], order=0)
+        self._active_tag: str | None = None
+        self._parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs) -> None:  # type: ignore[no-untyped-def]
+        if tag in {"h2", "h3", "p", "li"} and self._active_tag is None:
+            self._active_tag = tag
+            self._parts = []
+        elif tag == "br" and self._active_tag is not None:
+            self._parts.append(" ")
+
+    def handle_data(self, data: str) -> None:
+        if self._active_tag is not None:
+            self._parts.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag != self._active_tag:
+            return
+        text = _SPACE_RE.sub(" ", "".join(self._parts)).strip()
+        active_tag = self._active_tag
+        self._active_tag = None
+        self._parts = []
+        if not text:
+            return
+        if active_tag == "h2":
+            if self._current.entries:
+                self.sections.append(self._current)
+            self._current = PubgNewsSection(title=text, entries=[], order=len(self.sections) + 1)
+        elif active_tag == "h3":
+            self._current.entries.append(("subheading", text))
+        else:
+            self._current.entries.append(("bullet" if active_tag == "li" else "text", text))
+
+    def finish(self) -> list[PubgNewsSection]:
+        if self._current.entries:
+            self.sections.append(self._current)
+        return self.sections
 
 
 class PubgNewsService:
@@ -235,6 +301,16 @@ class PubgNewsService:
         return translated
 
     async def build_embed(self, post: PubgNewsPost) -> discord.Embed:
+        """Compatibility helper for callers that need just one compact embed."""
+        return (await self.build_embeds(post))[0]
+
+    async def build_embeds(self, post: PubgNewsPost) -> list[discord.Embed]:
+        sections = await self._load_official_sections(post)
+        if len(sections) >= 2:
+            return await self._build_section_embeds(post, sections)
+        return [await self._build_compact_embed(post)]
+
+    async def _build_compact_embed(self, post: PubgNewsPost) -> discord.Embed:
         post = await self._expand_official_post(post)
         title = await self.translate_to_ukrainian(post.title)
         excerpt = await self.translate_to_ukrainian(post.excerpt)
@@ -252,6 +328,126 @@ class PubgNewsService:
             embed.set_image(url=post.image_url)
         embed.set_footer(text=f"{EMBED_FOOTER} • PUBG news")
         return embed
+
+    async def _build_section_embeds(
+        self,
+        post: PubgNewsPost,
+        sections: list[PubgNewsSection],
+    ) -> list[discord.Embed]:
+        article_title = await self.translate_to_ukrainian(post.title)
+        total = len(sections)
+        embeds: list[discord.Embed] = []
+        for index, section in enumerate(sections, start=1):
+            section_title = await self.translate_to_ukrainian(section.title)
+            lines: list[str] = []
+            for kind, text in self._section_entries(section):
+                translated = await self.translate_to_ukrainian(text)
+                if kind == "subheading":
+                    lines.append(f"**{translated}**")
+                elif kind == "bullet":
+                    lines.append(f"• {translated}")
+                else:
+                    lines.append(translated)
+            embed = discord.Embed(
+                title=f"🎮 {article_title or 'Новини PUBG'} · {index}/{total}",
+                description=f"## {section_title}\n" + "\n".join(lines),
+                colour=discord.Colour.orange(),
+                url=post.url,
+                timestamp=post.published_at,
+            )
+            if index == 1 and post.image_url:
+                embed.set_image(url=post.image_url)
+            if index == total:
+                embed.add_field(name="Оригінал", value=f"[Відкрити повну новину]({post.url})", inline=False)
+            embed.set_footer(text=f"{EMBED_FOOTER} • PUBG news • частина {index} з {total}")
+            embeds.append(embed)
+        return embeds
+
+    async def _load_official_sections(self, post: PubgNewsPost) -> list[PubgNewsSection]:
+        if post.source != "official":
+            return []
+        try:
+            html = await self._fetch_html(post.url)
+        except (HttpRequestError, OSError, ValueError):
+            return []
+        body_match = _OFFICIAL_BODY_RE.search(html)
+        if body_match is None:
+            return []
+        parser = _OfficialSectionParser()
+        parser.feed(body_match.group("body"))
+        return self._select_sections(parser.finish())
+
+    def _select_sections(self, sections: list[PubgNewsSection]) -> list[PubgNewsSection]:
+        usable = [section for section in sections if self._section_entries(section)]
+        if len(usable) < 3:
+            return []
+        overview = usable[0]
+        candidates = usable[1:]
+        profile = self._article_profile(usable)
+        profile_pattern = _PROFILE_SECTION_PATTERNS.get(profile)
+        ranked = sorted(
+            candidates,
+            key=lambda section: (
+                bool(profile_pattern and profile_pattern.search(section.title)),
+                bool(_PUBG_SECTION_PRIORITY.search(section.title)),
+                len(self._section_entries(section)),
+            ),
+            reverse=True,
+        )
+        selected = [overview, *ranked[: self.config.pubg_news.max_series_parts - 1]]
+        return sorted({section.order: section for section in selected}.values(), key=lambda section: section.order)
+
+    @staticmethod
+    def _article_profile(sections: list[PubgNewsSection]) -> str:
+        sample_parts: list[str] = []
+        for section in sections:
+            sample_parts.append(section.title)
+            sample_parts.extend(entry for _, entry in section.entries[:2])
+        sample = " ".join(sample_parts)
+        for profile, pattern in _ARTICLE_PROFILE_PATTERNS.items():
+            if pattern.search(sample):
+                return profile
+        return "general"
+
+    async def inspect_source_structure(self) -> dict[str, Any]:
+        """Periodic health check for PUBG markup; never sends messages itself."""
+        posts = await self._fetch_official_posts()
+        if not posts:
+            return {"status": "no_posts"}
+        newest = posts[-1]
+        sections = await self._load_official_sections(newest)
+        return {
+            "status": "structured" if len(sections) >= 2 else "compact_fallback",
+            "article_id": newest.post_id,
+            "profile": self._article_profile(sections) if sections else "unknown",
+            "section_count": len(sections),
+        }
+
+    @classmethod
+    def _section_entries(cls, section: PubgNewsSection) -> list[tuple[str, str]]:
+        entries: list[tuple[str, str]] = []
+        characters = 0
+        for kind, raw_text in section.entries:
+            text = _SPACE_RE.sub(" ", raw_text).strip()
+            if not text or cls._is_section_noise(text):
+                continue
+            remaining = 760 - characters
+            if remaining < 90 or len(entries) >= 7:
+                break
+            text = cls._shorten(text, remaining)
+            entries.append((kind, text))
+            characters += len(text)
+        return entries
+
+    @staticmethod
+    def _is_section_noise(text: str) -> bool:
+        lowered = text.casefold()
+        return (
+            text.startswith("※")
+            or lowered.startswith("примечани")
+            or "услови" in lowered and "предостав" in lowered
+            or "может быть удален" in lowered
+        )
 
     async def _expand_official_post(self, post: PubgNewsPost) -> PubgNewsPost:
         if post.source != "official":

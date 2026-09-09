@@ -80,6 +80,8 @@ def _build_config() -> BotConfig:
             announce_on_startup=False,
             max_posts_per_run=2,
             translation_max_characters=500,
+            max_series_parts=5,
+            analysis_review_hours=48,
         ),
         steam=SteamDigestConfig(
             enabled=False,

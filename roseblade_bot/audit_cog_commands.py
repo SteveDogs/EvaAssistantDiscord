@@ -115,6 +115,9 @@ class AuditCogCommandsMixin:
             f" channels={self.pubg_news.channel_count()},"
             f" schedule={self.pubg_news.schedule_label()},"
             f" telegram={_bool_label(self.config.pubg_news.include_telegram)},"
+            f" series={self.config.pubg_news.max_series_parts},"
+            f" review_hours={self.config.pubg_news.analysis_review_hours},"
+            f" review={pubg_news_state.get('analysis_review', {}).get('status', 'n/a')},"
             f" last_error={pubg_news_state.get('last_error', 'n/a') or 'n/a'}"
         )
         lines.append(
@@ -341,7 +344,8 @@ class AuditCogCommandsMixin:
                 return
             selected = posts[-self.config.pubg_news.max_posts_per_run :]
             for post in selected:
-                await channel.send(embed=await self.pubg_news.build_embed(post))
+                for embed in await self.pubg_news.build_embeds(post):
+                    await channel.send(embed=embed)
         except (discord.Forbidden, discord.HTTPException) as error:
             await interaction.followup.send(f"Не смогла отправить новость: {error}", ephemeral=True)
             return
