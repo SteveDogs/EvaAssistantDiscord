@@ -20,6 +20,7 @@ from roseblade_bot.config import (
     SpecialDmConfig,
     SteamDigestConfig,
     SteamProfileWatchConfig,
+    SteamStatusConfig,
     WarMonitorConfig,
 )
 from roseblade_bot.war_monitor import WarMonitorPost, WarMonitorService
@@ -91,6 +92,13 @@ def _build_config() -> BotConfig:
             timezone="Europe/Simferopol",
             top_count=15,
             include_support_stats=False,
+        ),
+        steam_status=SteamStatusConfig(
+            enabled=False,
+            channel_ids=frozenset(),
+            poll_minutes=2,
+            failure_threshold=2,
+            cooldown_minutes=30,
         ),
         steam_profile_watch=SteamProfileWatchConfig(
             enabled=False,
