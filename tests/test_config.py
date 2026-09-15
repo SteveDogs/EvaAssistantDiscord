@@ -29,6 +29,11 @@ class ConfigTests(unittest.TestCase):
                         "PUBG_NEWS_TELEGRAM_USERNAME=iBakhmetNews",
                         "PUBG_NEWS_MAX_SERIES_PARTS=4",
                         "PUBG_NEWS_ANALYSIS_REVIEW_HOURS=72",
+                        "STEAM_STATUS_ENABLED=true",
+                        "STEAM_STATUS_CHANNEL_IDS=1398263697893359749",
+                        "STEAM_STATUS_POLL_MINUTES=3",
+                        "STEAM_STATUS_FAILURE_THRESHOLD=3",
+                        "STEAM_STATUS_COOLDOWN_MINUTES=45",
                         "STEAM_PROFILE_WATCH_ENABLED=true",
                         "STEAM_PROFILE_WATCH_CHANNEL_IDS=1354908421811601520",
                         "STEAM_PROFILE_WATCH_ALLOWED_ROLE_IDS=7;8",
@@ -90,6 +95,11 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.pubg_news.telegram_username, "iBakhmetNews")
             self.assertEqual(config.pubg_news.max_series_parts, 4)
             self.assertEqual(config.pubg_news.analysis_review_hours, 72)
+            self.assertTrue(config.steam_status.enabled)
+            self.assertEqual(config.steam_status.channel_ids, frozenset({1398263697893359749}))
+            self.assertEqual(config.steam_status.poll_minutes, 3)
+            self.assertEqual(config.steam_status.failure_threshold, 3)
+            self.assertEqual(config.steam_status.cooldown_minutes, 45)
             self.assertTrue(config.steam_profile_watch.enabled)
             self.assertEqual(config.steam_profile_watch.channel_ids, frozenset({1354908421811601520}))
             self.assertEqual(config.steam_profile_watch.allowed_role_ids, frozenset({7, 8}))

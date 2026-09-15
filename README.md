@@ -19,6 +19,7 @@
 - умеет автоматически ставить префиксы в ники по ролям
 - умеет иногда кокетливо троллить мат в чате вместо тупого наказания
 - умеет публиковать вечерний Steam-дайджест по расписанию
+- следит за доступностью Store, Community, Web API и Connection Managers Steam
 - умеет следить за выбранными Steam-профилями и писать о сменах ника, аватарки, игры и Steam level
 - умеет обновлять live-баннер сервера с онлайном, войсом и boost-уровнем
 - умеет работать как музыкальный бот через Lavalink, YouTube Music и Spotify mirror
@@ -405,6 +406,25 @@ STEAM_DIGEST_INCLUDE_SUPPORT_STATS=true
 - `STEAM_DIGEST_TOP_COUNT` — сколько игр показывать в списке
 - `STEAM_DIGEST_INCLUDE_SUPPORT_STATS` — добавлять ли блок со Steam Support
 
+## Мониторинг Steam
+
+EVA отдельно контролирует доступность основных сервисов Steam и не дублирует вечерний дайджест. Она сохраняет состояние после запуска, подтверждает проблему несколькими проверками и пишет только о сбое или восстановлении.
+
+```env
+STEAM_STATUS_ENABLED=true
+STEAM_STATUS_CHANNEL_IDS=1398263697893359749
+STEAM_STATUS_POLL_MINUTES=2
+STEAM_STATUS_FAILURE_THRESHOLD=2
+STEAM_STATUS_COOLDOWN_MINUTES=30
+```
+
+- `STEAM_STATUS_POLL_MINUTES` — частота проверок
+- `STEAM_STATUS_FAILURE_THRESHOLD` — сколько ошибок подряд нужно для тревоги
+- `STEAM_STATUS_COOLDOWN_MINUTES` — защита от повторного спама при нестабильном сбое
+- `/steam_status_now` — ручная проверка для администратора
+
+Для прозрачности в embed есть ссылка на [SteamStat.us](https://steamstat.us/), но EVA не использует его закрытый data endpoint: сервисы Steam проверяются напрямую.
+
 Даже если бот перезапустится позже `20:00`, EVA догонит пропущенный пост в этот же день и не задублирует его повторно после рестарта.
 Для ручной проверки без ожидания расписания используй `/steam_digest_now`.
 
@@ -615,7 +635,7 @@ STEAM_API_KEY=your_steam_api_key
 
 ## Новини PUBG Українською
 
-EVA може стежити за офіційними новинами PUBG та публічним каналом `@iBakhmetNews` у заданий Discord-канал.
+EVA стежить за офіційними новинами PUBG у заданому Discord-каналі.
 Вона визначає тип матеріалу, бере обкладинку, зберігає заголовки та списки й робить український виклад. Великі офіційні анонси виходять серією тематичних карток, а повний матеріал залишається за посиланням на джерело.
 
 ```env
@@ -624,7 +644,7 @@ PUBG_NEWS_CHANNEL_IDS=1398263697893359749
 PUBG_NEWS_POLL_MINUTES=30
 PUBG_NEWS_OFFICIAL_URL=https://pubg.com/ru/news
 PUBG_NEWS_TELEGRAM_USERNAME=iBakhmetNews
-PUBG_NEWS_INCLUDE_TELEGRAM=true
+PUBG_NEWS_INCLUDE_TELEGRAM=false
 PUBG_NEWS_ANNOUNCE_ON_STARTUP=false
 PUBG_NEWS_MAX_POSTS_PER_RUN=2
 PUBG_NEWS_TRANSLATION_MAX_CHARACTERS=1100
@@ -632,7 +652,7 @@ PUBG_NEWS_MAX_SERIES_PARTS=5
 PUBG_NEWS_ANALYSIS_REVIEW_HOURS=48
 ```
 
-- официальный PUBG является основным источником; Telegram можно выключить через `PUBG_NEWS_INCLUDE_TELEGRAM=false`
+- официальный PUBG — единственный источник по умолчанию; Telegram-источник можно включить отдельно через `PUBG_NEWS_INCLUDE_TELEGRAM=true`
 - при первом запуске EVA тихо запоминает уже существующие посты и публикует только следующие
 - если бот долго не работал, за один проход выйдет не больше `PUBG_NEWS_MAX_POSTS_PER_RUN` свежих публикаций
 - большие официальные статьи EVA делит максимум на `PUBG_NEWS_MAX_SERIES_PARTS` карточек: обзор, механики, получение предметов, цены и сроки

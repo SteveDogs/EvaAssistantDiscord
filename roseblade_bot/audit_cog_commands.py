@@ -129,6 +129,16 @@ class AuditCogCommandsMixin:
             f" top={self.config.steam.top_count},"
             f" support={_bool_label(self.config.steam.include_support_stats)}"
         )
+        steam_status_state = self._steam_status_state(interaction.guild.id)
+        lines.append(
+            "Steam status:"
+            f" enabled={_bool_label(self.config.steam_status.enabled)},"
+            f" configured={_bool_label(self.steam_status.is_configured)},"
+            f" channels={self.steam_status.channel_count()},"
+            f" schedule={self.steam_status.schedule_label()},"
+            f" incident={_bool_label(bool(steam_status_state.get('incident_active')))},"
+            f" last_error={steam_status_state.get('last_error', 'n/a') or 'n/a'}"
+        )
         lines.append(
             "Steam profiles:"
             f" enabled={_bool_label(self.config.steam_profile_watch.enabled)},"
@@ -355,6 +365,32 @@ class AuditCogCommandsMixin:
 
         source_note = f" Не ответили: {' | '.join(errors)}" if errors else ""
         await interaction.followup.send(f"Отправила свежие новости PUBG.{source_note}", ephemeral=True)
+
+    @app_commands.command(name="steam_status_now", description="Проверить состояние сервисов Steam")
+    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.guild_only()
+    async def steam_status_now(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        if not self.steam_status.is_configured:
+            await interaction.followup.send("Мониторинг Steam выключен или для него не задан канал.", ephemeral=True)
+            return
+        try:
+            snapshot = await self.steam_status.fetch_snapshot()
+        except (OSError, ValueError, RuntimeError) as error:
+            await interaction.followup.send(f"Steam сейчас не отвечает на проверку: {error}", ephemeral=True)
+            return
+
+        failed = snapshot.failed_services
+        if failed:
+            channel = interaction.channel
+            if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+                await interaction.followup.send("Нужен текстовый канал для отчёта.", ephemeral=True)
+                return
+            await channel.send(embed=self.steam_status.build_incident_embed(failed))
+            await interaction.followup.send("Проверка отправлена: есть недоступные сервисы.", ephemeral=True)
+            return
+        latency = ", ".join(f"{service.label}: {service.latency_ms or 0} мс" for service in snapshot.services)
+        await interaction.followup.send(f"Steam отвечает нормально. {latency}", ephemeral=True)
 
     @app_commands.command(name="air_alert_now", description="Отправить текущую карту повітряних тривог в этот канал")
     @app_commands.checks.has_permissions(administrator=True)

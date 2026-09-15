@@ -86,6 +86,8 @@ class AuditCogRuntimeMixin:
     def _ensure_runtime_workers(self) -> None:
         if self.steam_digest.is_configured and not self.steam_digest_scheduler.is_running():
             self.steam_digest_scheduler.start()
+        if self.steam_status.is_configured and not self.steam_status_scheduler.is_running():
+            self.steam_status_scheduler.start()
         if self.steam_profile_watch.is_configured and not self.steam_profile_watch_scheduler.is_running():
             self.steam_profile_watch_scheduler.start()
         if self.pubg_news.is_configured and not self.pubg_news_scheduler.is_running():
@@ -398,6 +400,8 @@ class AuditCogRuntimeMixin:
     def cog_unload(self) -> None:
         if self.steam_digest_scheduler.is_running():
             self.steam_digest_scheduler.cancel()
+        if self.steam_status_scheduler.is_running():
+            self.steam_status_scheduler.cancel()
         if self.steam_profile_watch_scheduler.is_running():
             self.steam_profile_watch_scheduler.cancel()
         if self.pubg_news_scheduler.is_running():
@@ -441,6 +445,7 @@ class AuditCogRuntimeMixin:
                 await self.bootstrap_guild(guild)
             await self.run_startup_protected_ban_check()
             await self.run_startup_server_banner_refresh()
+            await self.run_startup_steam_status_sync()
             await self.run_startup_steam_profile_watch_sync()
             await self.run_startup_pubg_news_sync()
             await self.run_startup_air_alert_refresh()
@@ -451,6 +456,7 @@ class AuditCogRuntimeMixin:
             await self.bootstrap_guild(guild)
         await self.run_startup_protected_ban_check()
         await self.run_startup_server_banner_refresh()
+        await self.run_startup_steam_status_sync()
         await self.run_startup_steam_profile_watch_sync()
         await self.run_startup_pubg_news_sync()
         await self.run_startup_air_alert_refresh()
@@ -919,6 +925,158 @@ class AuditCogRuntimeMixin:
     @pubg_news_scheduler.error
     async def pubg_news_scheduler_error(self, error: Exception) -> None:
         print(f"PUBG news scheduler crashed: {error}")
+
+    def _resolve_steam_status_channel(self, channel_id: int) -> discord.TextChannel | discord.Thread | None:
+        channel = self.bot.get_channel(channel_id)
+        if isinstance(channel, (discord.TextChannel, discord.Thread)):
+            return channel
+        for guild in self.bot.guilds:
+            get_channel_or_thread = getattr(guild, "get_channel_or_thread", None)
+            candidate = get_channel_or_thread(channel_id) if callable(get_channel_or_thread) else guild.get_channel(channel_id)
+            if isinstance(candidate, (discord.TextChannel, discord.Thread)):
+                return candidate
+        return None
+
+    def _configured_steam_status_channels_by_guild(self) -> dict[int, list[discord.TextChannel | discord.Thread]]:
+        channels_by_guild: dict[int, list[discord.TextChannel | discord.Thread]] = {}
+        for channel_id in sorted(self.config.steam_status.channel_ids):
+            channel = self._resolve_steam_status_channel(channel_id)
+            if channel is not None:
+                channels_by_guild.setdefault(channel.guild.id, []).append(channel)
+        return channels_by_guild
+
+    def _steam_status_state(self, guild_id: int) -> dict[str, Any]:
+        return self.store.get_service_state(guild_id, "steam_status")
+
+    @staticmethod
+    def _steam_status_snapshot_state(snapshot) -> dict[str, bool]:
+        return {service.key: service.available for service in snapshot.services}
+
+    async def run_startup_steam_status_sync(self) -> None:
+        if not self.steam_status.is_configured or self._steam_status_startup_sync_done:
+            return
+        channels_by_guild = self._configured_steam_status_channels_by_guild()
+        if not channels_by_guild:
+            return
+        try:
+            snapshot = await self.steam_status.fetch_snapshot()
+        except (OSError, ValueError, RuntimeError) as error:
+            print(f"Steam status startup probe failed: {error}")
+            return
+
+        now = discord.utils.utcnow().isoformat()
+        for guild_id in channels_by_guild:
+            state = self._steam_status_state(guild_id)
+            if state.get("baseline"):
+                continue
+            state.update(
+                {
+                    "baseline": self._steam_status_snapshot_state(snapshot),
+                    "failure_counts": {service.key: 0 for service in snapshot.services},
+                    "incident_active": False,
+                    "incident_services": [],
+                    "last_poll_at": now,
+                    "last_error": None,
+                }
+            )
+            self.store.set_service_state(guild_id, "steam_status", state)
+        self._steam_status_startup_sync_done = True
+
+    async def dispatch_steam_status_snapshot(self, snapshot, guild_ids: list[int]) -> None:
+        channels_by_guild = self._configured_steam_status_channels_by_guild()
+        services_by_key = {service.key: service for service in snapshot.services}
+        now = discord.utils.utcnow()
+        for guild_id in guild_ids:
+            channels = channels_by_guild.get(guild_id, [])
+            if not channels:
+                continue
+            state = self._steam_status_state(guild_id)
+            counts = {str(key): int(value) for key, value in state.get("failure_counts", {}).items()}
+            for service in snapshot.services:
+                counts[service.key] = counts.get(service.key, 0) + 1 if not service.available else 0
+
+            failed = tuple(
+                service
+                for service in snapshot.services
+                if counts.get(service.key, 0) >= self.config.steam_status.failure_threshold
+            )
+            was_active = bool(state.get("incident_active"))
+            previous_keys = {str(key) for key in state.get("incident_services", [])}
+            current_keys = {service.key for service in failed}
+            sent_error: str | None = None
+
+            if failed and (not was_active or current_keys != previous_keys):
+                last_alert = self._parse_state_datetime(state.get("last_alert_at"))
+                cooldown_passed = (
+                    last_alert is None
+                    or now - last_alert >= timedelta(minutes=self.config.steam_status.cooldown_minutes)
+                    or not was_active
+                )
+                if cooldown_passed:
+                    try:
+                        embed = self.steam_status.build_incident_embed(failed)
+                        for channel in channels:
+                            await channel.send(embed=embed)
+                        state["last_alert_at"] = now.isoformat()
+                    except (discord.Forbidden, discord.HTTPException) as error:
+                        sent_error = str(error)
+                if not was_active:
+                    state["incident_started_at"] = now.isoformat()
+                state["incident_active"] = True
+                state["incident_services"] = sorted(current_keys)
+            elif not failed and was_active:
+                restored = tuple(
+                    services_by_key[key]
+                    for key in previous_keys
+                    if key in services_by_key and services_by_key[key].available
+                )
+                started_at = self._parse_state_datetime(state.get("incident_started_at"))
+                try:
+                    embed = self.steam_status.build_recovery_embed(restored or snapshot.services, _format_duration(started_at) or "менее минуты")
+                    for channel in channels:
+                        await channel.send(embed=embed)
+                except (discord.Forbidden, discord.HTTPException) as error:
+                    sent_error = str(error)
+                state["incident_active"] = False
+                state["incident_services"] = []
+                state.pop("incident_started_at", None)
+
+            state["baseline"] = self._steam_status_snapshot_state(snapshot)
+            state["failure_counts"] = counts
+            state["last_poll_at"] = now.isoformat()
+            state["last_error"] = sent_error
+            self.store.set_service_state(guild_id, "steam_status", state)
+
+    @tasks.loop(minutes=1)
+    async def steam_status_scheduler(self) -> None:
+        if not self.steam_status.is_configured:
+            return
+        channels_by_guild = self._configured_steam_status_channels_by_guild()
+        if not channels_by_guild:
+            return
+        now = discord.utils.utcnow()
+        due_guild_ids = [
+            guild_id
+            for guild_id in channels_by_guild
+            if (last_poll := self._parse_state_datetime(self._steam_status_state(guild_id).get("last_poll_at"))) is None
+            or now - last_poll >= timedelta(minutes=self.config.steam_status.poll_minutes)
+        ]
+        if not due_guild_ids:
+            return
+        try:
+            snapshot = await self.steam_status.fetch_snapshot()
+        except (OSError, ValueError, RuntimeError) as error:
+            print(f"Steam status probe failed: {error}")
+            return
+        await self.dispatch_steam_status_snapshot(snapshot, due_guild_ids)
+
+    @steam_status_scheduler.before_loop
+    async def before_steam_status_scheduler(self) -> None:
+        await self.bot.wait_until_ready()
+
+    @steam_status_scheduler.error
+    async def steam_status_scheduler_error(self, error: Exception) -> None:
+        print(f"Steam status scheduler crashed: {error}")
 
     async def run_startup_air_alert_refresh(self) -> None:
         if not self.air_alert.is_configured or self._air_alert_startup_refresh_done:

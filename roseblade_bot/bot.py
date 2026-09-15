@@ -19,6 +19,7 @@ from roseblade_bot.server_banner import ServerBannerService
 from roseblade_bot.single_instance import SingleInstanceError, acquire_single_instance_lock
 from roseblade_bot.steam_digest import SteamDigestService
 from roseblade_bot.steam_profile_watch import SteamProfileWatchService
+from roseblade_bot.steam_status import SteamStatusService
 from roseblade_bot.storage import JsonStateStore
 from roseblade_bot.war_monitor import WarMonitorService
 
@@ -40,6 +41,7 @@ def build_bot(config: BotConfig) -> commands.Bot:
         pubg_lookup=PubgLookupService(config),
         pubg_news=PubgNewsService(config),
         steam_digest=SteamDigestService(config),
+        steam_status=SteamStatusService(config),
         steam_profile_watch=SteamProfileWatchService(config),
         server_banner=ServerBannerService(config),
         air_alert=AirAlertService(config),

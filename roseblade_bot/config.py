@@ -135,6 +135,15 @@ class SteamDigestConfig:
 
 
 @dataclass(slots=True)
+class SteamStatusConfig:
+    enabled: bool
+    channel_ids: frozenset[int]
+    poll_minutes: int
+    failure_threshold: int
+    cooldown_minutes: int
+
+
+@dataclass(slots=True)
 class SteamProfileWatchTarget:
     steamid: int
     aliases: tuple[str, ...]
@@ -265,6 +274,11 @@ _LEGACY_ALIASES = {
     "steam_digest_timezone": "steam.timezone",
     "steam_digest_top_count": "steam.top_count",
     "steam_digest_include_support_stats": "steam.include_support_stats",
+    "steam_status_enabled": "steam_status.enabled",
+    "steam_status_channel_ids": "steam_status.channel_ids",
+    "steam_status_poll_minutes": "steam_status.poll_minutes",
+    "steam_status_failure_threshold": "steam_status.failure_threshold",
+    "steam_status_cooldown_minutes": "steam_status.cooldown_minutes",
     "steam_profile_watch_enabled": "steam_profile_watch.enabled",
     "steam_profile_watch_channel_ids": "steam_profile_watch.channel_ids",
     "steam_profile_watch_allowed_role_ids": "steam_profile_watch.allowed_role_ids",
@@ -326,6 +340,7 @@ class BotConfig:
     pubg: PubgConfig
     pubg_news: PubgNewsConfig
     steam: SteamDigestConfig
+    steam_status: SteamStatusConfig
     steam_profile_watch: SteamProfileWatchConfig
     banner: ServerBannerConfig
     air_alert: AirAlertConfig
@@ -568,6 +583,13 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
         top_count=min(25, max(5, _parse_int_env("STEAM_DIGEST_TOP_COUNT", default=15))),
         include_support_stats=_parse_bool_env("STEAM_DIGEST_INCLUDE_SUPPORT_STATS", default=True),
     )
+    steam_status_config = SteamStatusConfig(
+        enabled=_parse_bool_env("STEAM_STATUS_ENABLED", default=False),
+        channel_ids=_parse_id_set_env("STEAM_STATUS_CHANNEL_IDS"),
+        poll_minutes=max(1, _parse_int_env("STEAM_STATUS_POLL_MINUTES", default=2)),
+        failure_threshold=max(1, min(5, _parse_int_env("STEAM_STATUS_FAILURE_THRESHOLD", default=2))),
+        cooldown_minutes=max(5, _parse_int_env("STEAM_STATUS_COOLDOWN_MINUTES", default=30)),
+    )
     steam_profile_watch_config = SteamProfileWatchConfig(
         enabled=_parse_bool_env("STEAM_PROFILE_WATCH_ENABLED", default=False),
         channel_ids=_parse_id_set_env("STEAM_PROFILE_WATCH_CHANNEL_IDS"),
@@ -638,6 +660,7 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
         pubg=pubg_config,
         pubg_news=pubg_news_config,
         steam=steam_config,
+        steam_status=steam_status_config,
         steam_profile_watch=steam_profile_watch_config,
         banner=banner_config,
         air_alert=air_alert_config,
