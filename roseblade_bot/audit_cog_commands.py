@@ -389,8 +389,12 @@ class AuditCogCommandsMixin:
             await channel.send(embed=self.steam_status.build_incident_embed(failed))
             await interaction.followup.send("Проверка отправлена: есть недоступные сервисы.", ephemeral=True)
             return
-        latency = ", ".join(f"{service.label}: {service.latency_ms or 0} мс" for service in snapshot.services)
-        await interaction.followup.send(f"Steam отвечает нормально. {latency}", ephemeral=True)
+        channel = interaction.channel
+        if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+            await interaction.followup.send("Нужен текстовый канал для отчёта.", ephemeral=True)
+            return
+        await channel.send(embed=self.steam_status.build_normal_embed(snapshot.services))
+        await interaction.followup.send("Штатный статус Steam отправлен в этот канал.", ephemeral=True)
 
     @app_commands.command(name="air_alert_now", description="Отправить текущую карту повітряних тривог в этот канал")
     @app_commands.checks.has_permissions(administrator=True)

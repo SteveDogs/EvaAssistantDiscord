@@ -416,11 +416,13 @@ STEAM_STATUS_CHANNEL_IDS=1398263697893359749
 STEAM_STATUS_POLL_MINUTES=2
 STEAM_STATUS_FAILURE_THRESHOLD=2
 STEAM_STATUS_COOLDOWN_MINUTES=30
+STEAM_STATUS_ANNOUNCE_ON_STARTUP=false
 ```
 
 - `STEAM_STATUS_POLL_MINUTES` — частота проверок
 - `STEAM_STATUS_FAILURE_THRESHOLD` — сколько ошибок подряд нужно для тревоги
 - `STEAM_STATUS_COOLDOWN_MINUTES` — защита от повторного спама при нестабильном сбое
+- `STEAM_STATUS_ANNOUNCE_ON_STARTUP` — разово публиковать результат проверки после старта
 - `/steam_status_now` — ручная проверка для администратора
 
 Для прозрачности в embed есть ссылка на [SteamStat.us](https://steamstat.us/), но EVA не использует его закрытый data endpoint: сервисы Steam проверяются напрямую.

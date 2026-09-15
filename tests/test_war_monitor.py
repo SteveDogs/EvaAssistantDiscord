@@ -99,6 +99,7 @@ def _build_config() -> BotConfig:
             poll_minutes=2,
             failure_threshold=2,
             cooldown_minutes=30,
+            announce_on_startup=False,
         ),
         steam_profile_watch=SteamProfileWatchConfig(
             enabled=False,
