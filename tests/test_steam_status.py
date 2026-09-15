@@ -14,6 +14,7 @@ def _service() -> SteamStatusService:
                 poll_minutes=2,
                 failure_threshold=2,
                 cooldown_minutes=30,
+                announce_on_startup=False,
             )
         )
     )
@@ -34,6 +35,13 @@ class SteamStatusTests(unittest.TestCase):
         )
         self.assertIn("снова отвечает", embed.title or "")
         self.assertEqual(embed.fields[1].value, "4 мин")
+
+    def test_builds_normal_embed(self) -> None:
+        embed = _service().build_normal_embed(
+            (SteamServiceProbe("community", "Steam Community", True, 85, None),)
+        )
+        self.assertIn("работает штатно", embed.title or "")
+        self.assertIn("85 мс", embed.fields[0].value)
 
 
 if __name__ == "__main__":

@@ -108,6 +108,22 @@ class SteamStatusService:
         return embed
 
     @staticmethod
+    def build_normal_embed(services: tuple[SteamServiceProbe, ...]) -> discord.Embed:
+        lines = "\n".join(
+            f"• {service.label} — {service.latency_ms or 0} мс" for service in services
+        )
+        embed = discord.Embed(
+            title="🟢 Steam работает штатно",
+            description="Ева проверила ключевые сервисы Steam: всё отвечает, можно спокойно заходить.",
+            colour=discord.Colour.green(),
+            url=STEAMSTAT_URL,
+        )
+        embed.add_field(name="Проверка сейчас", value=lines[:1024], inline=False)
+        embed.add_field(name="Статус", value=f"[Открыть SteamStat.us]({STEAMSTAT_URL})", inline=False)
+        embed.set_footer(text=f"{EMBED_FOOTER} • Steam status")
+        return embed
+
+    @staticmethod
     def build_recovery_embed(services: tuple[SteamServiceProbe, ...], duration_label: str) -> discord.Embed:
         names = ", ".join(service.label for service in services)
         embed = discord.Embed(

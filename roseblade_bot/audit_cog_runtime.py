@@ -965,20 +965,31 @@ class AuditCogRuntimeMixin:
             return
 
         now = discord.utils.utcnow().isoformat()
-        for guild_id in channels_by_guild:
+        for guild_id, channels in channels_by_guild.items():
             state = self._steam_status_state(guild_id)
-            if state.get("baseline"):
-                continue
-            state.update(
-                {
-                    "baseline": self._steam_status_snapshot_state(snapshot),
-                    "failure_counts": {service.key: 0 for service in snapshot.services},
-                    "incident_active": False,
-                    "incident_services": [],
-                    "last_poll_at": now,
-                    "last_error": None,
-                }
-            )
+            if not state.get("baseline"):
+                state.update(
+                    {
+                        "baseline": self._steam_status_snapshot_state(snapshot),
+                        "failure_counts": {service.key: 0 for service in snapshot.services},
+                        "incident_active": False,
+                        "incident_services": [],
+                        "last_poll_at": now,
+                        "last_error": None,
+                    }
+                )
+            if self.config.steam_status.announce_on_startup and not state.get("startup_announcement_sent"):
+                try:
+                    embed = (
+                        self.steam_status.build_incident_embed(snapshot.failed_services)
+                        if snapshot.failed_services
+                        else self.steam_status.build_normal_embed(snapshot.services)
+                    )
+                    for channel in channels:
+                        await channel.send(embed=embed)
+                    state["startup_announcement_sent"] = True
+                except (discord.Forbidden, discord.HTTPException) as error:
+                    state["last_error"] = str(error)
             self.store.set_service_state(guild_id, "steam_status", state)
         self._steam_status_startup_sync_done = True
 
