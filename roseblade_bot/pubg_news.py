@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import hashlib
 from html.parser import HTMLParser
 from html import unescape
 import re
@@ -148,6 +149,13 @@ class PubgNewsService:
 
     def schedule_label(self) -> str:
         return f"every {self.config.pubg_news.poll_minutes}m"
+
+    @staticmethod
+    def content_fingerprint(post: PubgNewsPost) -> str:
+        """Stable cross-source key: a repost with a different ID must not be re-announced."""
+        normalized = _SPACE_RE.sub(" ", f"{post.title} {post.excerpt}").casefold().strip()
+        normalized = re.sub(r"[^\w\s]", "", normalized)
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:24]
 
     async def fetch_recent_posts(self) -> tuple[list[PubgNewsPost], list[str]]:
         tasks = [self._fetch_official_posts()]

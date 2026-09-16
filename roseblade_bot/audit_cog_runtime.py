@@ -820,9 +820,10 @@ class AuditCogRuntimeMixin:
                 state = self._pubg_news_state(guild_id)
                 # Seed only a brand-new installation. Reconnects must preserve the
                 # delivery history so an interrupted restart cannot hide new posts.
-                if state.get("seen_keys"):
+                if state.get("seen_keys") and state.get("seen_fingerprints"):
                     continue
                 state["seen_keys"] = [post.key for post in posts][-80:]
+                state["seen_fingerprints"] = sorted({self.pubg_news.content_fingerprint(post) for post in posts})[-200:]
                 state["last_poll_at"] = discord.utils.utcnow().isoformat()
                 state["last_error"] = " | ".join(errors) if errors else None
                 self.store.set_service_state(guild_id, "pubg_news", state)
@@ -837,7 +838,12 @@ class AuditCogRuntimeMixin:
         for guild_id, channels in channels_by_guild.items():
             state = self._pubg_news_state(guild_id)
             seen_keys = {str(value) for value in state.get("seen_keys", []) if str(value)}
-            unseen = [post for post in posts if post.key not in seen_keys]
+            seen_fingerprints = {str(value) for value in state.get("seen_fingerprints", []) if str(value)}
+            unseen = [
+                post
+                for post in posts
+                if post.key not in seen_keys and self.pubg_news.content_fingerprint(post) not in seen_fingerprints
+            ]
             if not unseen:
                 state["last_poll_at"] = discord.utils.utcnow().isoformat()
                 self.store.set_service_state(guild_id, "pubg_news", state)
@@ -847,6 +853,7 @@ class AuditCogRuntimeMixin:
             skipped = unseen[: -self.config.pubg_news.max_posts_per_run]
             candidates = unseen[-self.config.pubg_news.max_posts_per_run :]
             seen_keys.update(post.key for post in skipped)
+            seen_fingerprints.update(self.pubg_news.content_fingerprint(post) for post in skipped)
             publish_errors: list[str] = []
             for post in candidates:
                 try:
@@ -858,8 +865,10 @@ class AuditCogRuntimeMixin:
                     publish_errors.append(f"{post.key}: {error}")
                     continue
                 seen_keys.add(post.key)
+                seen_fingerprints.add(self.pubg_news.content_fingerprint(post))
 
             state["seen_keys"] = sorted(seen_keys)[-80:]
+            state["seen_fingerprints"] = sorted(seen_fingerprints)[-200:]
             state["last_poll_at"] = discord.utils.utcnow().isoformat()
             state["last_error"] = " | ".join(publish_errors) if publish_errors else None
             self.store.set_service_state(guild_id, "pubg_news", state)
@@ -878,7 +887,7 @@ class AuditCogRuntimeMixin:
 
     @tasks.loop(minutes=1)
     async def pubg_news_scheduler(self) -> None:
-        if not self.pubg_news.is_configured:
+        if not self.pubg_news.is_configured or not self._pubg_news_startup_sync_done:
             return
 
         channels_by_guild = self._configured_pubg_news_channels_by_guild()
