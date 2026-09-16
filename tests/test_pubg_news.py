@@ -1,8 +1,9 @@
+from datetime import datetime
 from types import SimpleNamespace
 import unittest
 
 from roseblade_bot.config import PubgNewsConfig
-from roseblade_bot.pubg_news import PubgNewsService, _OFFICIAL_BODY_RE, _OfficialSectionParser
+from roseblade_bot.pubg_news import PubgNewsPost, PubgNewsService, _OFFICIAL_BODY_RE, _OfficialSectionParser
 
 
 def _service() -> PubgNewsService:
@@ -78,6 +79,11 @@ class PubgNewsTests(unittest.TestCase):
             PubgNewsService._localize_pubg_terms("PUBG x Magic Battle"),
             "PUBG x Магічна битва",
         )
+
+    def test_content_fingerprint_ignores_source_and_punctuation(self) -> None:
+        post = PubgNewsPost("official", "1", "Update: 43.1", "Important changes!", "https://example.com/1", None, datetime.now())
+        repost = PubgNewsPost("telegram", "2", "Update 43.1", "Important changes", "https://example.com/2", None, datetime.now())
+        self.assertEqual(_service().content_fingerprint(post), _service().content_fingerprint(repost))
 
     def test_keeps_article_headings_and_bullets_as_sections(self) -> None:
         parser = _OfficialSectionParser()
