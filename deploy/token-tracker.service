@@ -1,0 +1,16 @@
+[Unit]
+Description=Token Tracker Telegram Bot
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/tokentracker
+EnvironmentFile=/root/tokentracker/.env
+ExecStart=/root/tokentracker/.venv/bin/python -m crypto_tracker.app
+Restart=always
+RestartSec=15
+User=root
+
+[Install]
+WantedBy=multi-user.target
