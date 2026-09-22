@@ -9,3 +9,6 @@ data/
 build/
 dist/
 tmp/
+.env
+crypto_tracker/data/
+crypto_tracker/__pycache__/
