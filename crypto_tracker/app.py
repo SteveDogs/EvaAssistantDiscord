@@ -10,7 +10,7 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 
 from .charts import render_chart
 from .config import Settings
-from .formatters import change, coin_card, dashboard, keyboard, money, move_alert
+from .formatters import change, coin_card, dashboard, keyboard, market_table, money, move_alert
 from .provider import Coin, CoinGeckoProvider
 from .storage import Storage
 
@@ -34,20 +34,28 @@ class Tracker:
             coins = await self.fetch()
             text = dashboard(coins)
             message_id = self.storage.get("dashboard_message_id")
-            try:
-                if message_id:
-                    await bot.edit_message_text(text, chat_id=self.settings.channel_id, message_id=int(message_id), parse_mode=ParseMode.HTML, reply_markup=keyboard())
-                else:
+            if self.settings.publish_mode == "feed":
+                await bot.send_message(
+                    self.settings.channel_id,
+                    market_table(coins),
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=keyboard(),
+                )
+            else:
+                try:
+                    if message_id:
+                        await bot.edit_message_text(text, chat_id=self.settings.channel_id, message_id=int(message_id), parse_mode=ParseMode.HTML, reply_markup=keyboard())
+                    else:
+                        message = await bot.send_message(self.settings.channel_id, text, parse_mode=ParseMode.HTML, reply_markup=keyboard())
+                        self.storage.set("dashboard_message_id", str(message.message_id))
+                        try:
+                            await bot.pin_chat_message(self.settings.channel_id, message.message_id, disable_notification=True)
+                        except Exception:
+                            logger.info("Bot cannot pin the dashboard message in this channel")
+                except Exception as exc:
+                    logger.warning("Dashboard edit failed; creating a new dashboard: %s", exc)
                     message = await bot.send_message(self.settings.channel_id, text, parse_mode=ParseMode.HTML, reply_markup=keyboard())
                     self.storage.set("dashboard_message_id", str(message.message_id))
-                    try:
-                        await bot.pin_chat_message(self.settings.channel_id, message.message_id, disable_notification=True)
-                    except Exception:
-                        logger.info("Bot cannot pin the dashboard message in this channel")
-            except Exception as exc:
-                logger.warning("Dashboard edit failed; creating a new dashboard: %s", exc)
-                message = await bot.send_message(self.settings.channel_id, text, parse_mode=ParseMode.HTML, reply_markup=keyboard())
-                self.storage.set("dashboard_message_id", str(message.message_id))
 
             previous = self.storage.get_prices()
             current = {coin.symbol: coin.price for coin in coins}

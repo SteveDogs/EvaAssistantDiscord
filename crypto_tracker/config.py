@@ -23,6 +23,7 @@ class Settings:
     channel_id: int
     interval_seconds: int
     currency: str
+    publish_mode: str
     symbols: dict[str, str]
     move_alert_percent: float
     alert_cooldown_minutes: int
@@ -51,6 +52,7 @@ class Settings:
             channel_id=int(channel_id),
             interval_seconds=max(60, int(os.getenv("UPDATE_INTERVAL_SECONDS", "180"))),
             currency=os.getenv("QUOTE_CURRENCY", "usd").lower(),
+            publish_mode=(os.getenv("PUBLISH_MODE", "feed").strip().lower() or "feed"),
             symbols=symbols,
             move_alert_percent=float(os.getenv("MOVE_ALERT_PERCENT", "5")),
             alert_cooldown_minutes=max(5, int(os.getenv("ALERT_COOLDOWN_MINUTES", "30"))),
