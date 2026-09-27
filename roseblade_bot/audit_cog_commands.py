@@ -27,7 +27,14 @@ class AuditCogCommandsMixin:
         """Send a complete, private role-permission report to a server manager."""
         assert interaction.guild is not None
         await interaction.response.defer(ephemeral=True, thinking=True)
-        report = build_role_audit(interaction.guild)
+        members_by_role: dict[int, list[str]] = {}
+        async for member in interaction.guild.fetch_members(limit=None):
+            for role in member.roles:
+                members_by_role.setdefault(role.id, []).append(member.display_name)
+        for names in members_by_role.values():
+            names.sort(key=str.casefold)
+
+        report = build_role_audit(interaction.guild, members_by_role=members_by_role)
         await interaction.followup.send(
             (
                 f"Проверила **{report.role_count}** ролей. "

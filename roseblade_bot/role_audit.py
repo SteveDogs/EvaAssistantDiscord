@@ -92,7 +92,11 @@ def _role_header(role: discord.Role) -> str:
     return ", ".join(labels)
 
 
-def build_role_audit(guild: discord.Guild) -> RoleAuditResult:
+def build_role_audit(
+    guild: discord.Guild,
+    *,
+    members_by_role: dict[int, list[str]] | None = None,
+) -> RoleAuditResult:
     """Build a compact Discord embed plus a complete Markdown report."""
     ordered_roles = sorted(guild.roles, key=lambda role: role.position, reverse=True)
     high_risk_roles: list[tuple[discord.Role, list[str]]] = []
@@ -107,7 +111,12 @@ def build_role_audit(guild: discord.Guild) -> RoleAuditResult:
     for role in ordered_roles:
         permissions = _role_permissions(role)
         dangerous = [label for _, label, risk in permissions if risk in _RISK_LABELS]
-        member_count = len(role.members)
+        member_names = (
+            members_by_role.get(role.id, [])
+            if members_by_role is not None
+            else sorted((member.display_name for member in role.members), key=str.casefold)
+        )
+        member_count = len(member_names)
         lines.extend(
             [
                 f"## {role.position}. {role.name}",
@@ -119,6 +128,10 @@ def build_role_audit(guild: discord.Guild) -> RoleAuditResult:
             lines.append("Серверные права: " + ", ".join(label for _, label, _ in permissions) + ".")
         else:
             lines.append("Серверные права: специальных прав нет.")
+        if member_names:
+            lines.append("Участники: " + ", ".join(member_names) + ".")
+        else:
+            lines.append("Участники: роль сейчас никому не выдана.")
         if dangerous:
             risk_notes = []
             if getattr(role.permissions, "administrator", False):
