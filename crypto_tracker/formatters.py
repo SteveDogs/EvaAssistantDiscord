@@ -32,6 +32,39 @@ def keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def _table_price(value: float) -> str:
+    if value >= 1_000:
+        return f"${value:,.0f}"
+    if value >= 1:
+        return f"${value:,.2f}"
+    if value >= 0.01:
+        return f"${value:.4f}"
+    return f"${value:.6f}"
+
+
+def _table_change(value: float | None) -> str:
+    if value is None:
+        return "   н/д"
+    return f"{value:+6.2f}%"
+
+
+def market_table(coins: list[Coin]) -> str:
+    """Render a fixed-width Telegram table that remains readable on mobile."""
+    now = datetime.now().strftime("%H:%M")
+    up_count = sum(1 for coin in coins if (coin.change_24h or 0) > 0)
+    down_count = sum(1 for coin in coins if (coin.change_24h or 0) < 0)
+    rows = ["АКТИВ      ЦЕНА          24ч", "────────────────────────────"]
+    for coin in coins:
+        rows.append(f"{coin.symbol:<7} {_table_price(coin.price):>12} {_table_change(coin.change_24h):>8}")
+    return "\n".join(
+        [
+            f"<b>📊 Крипторынок · {now}</b>",
+            "<pre>" + "\n".join(rows) + "</pre>",
+            f"<blockquote>🟢 Растут: {up_count} · 🔴 Снижаются: {down_count} · данные CoinGecko</blockquote>",
+        ]
+    )
+
+
 def dashboard(coins: list[Coin]) -> str:
     now = datetime.now().strftime("%d.%m %H:%M")
     lines = ["<b>Крипторынок сейчас</b>", "<blockquote>Котировки обновляются автоматически. Это информация, не финансовый совет.</blockquote>"]
