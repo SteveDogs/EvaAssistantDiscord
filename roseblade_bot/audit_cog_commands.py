@@ -14,11 +14,30 @@ from discord import app_commands
 from roseblade_bot.audit_definitions import CHANNEL_DEFINITIONS, EVENT_CHOICES, EVENT_DEFINITIONS
 from roseblade_bot.chat_banter import CHAT_BANTER
 from roseblade_bot.formatters import _bool_label, _parse_hex_color
+from roseblade_bot.role_audit import build_role_audit
 from roseblade_bot.server_banner import ServerBannerRenderResult
 from roseblade_bot.voice_guard import VOICE_GUARD
 
 
 class AuditCogCommandsMixin:
+    @app_commands.command(name="roles_audit", description="Понятно объяснить права всех ролей сервера")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.guild_only()
+    async def roles_audit(self, interaction: discord.Interaction) -> None:
+        """Send a complete, private role-permission report to a server manager."""
+        assert interaction.guild is not None
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        report = build_role_audit(interaction.guild)
+        await interaction.followup.send(
+            (
+                f"Проверила **{report.role_count}** ролей. "
+                f"Ролей с сильными правами: **{report.high_risk_count}**."
+            ),
+            embed=report.embed,
+            file=discord.File(report.report, filename=report.report.name),
+            ephemeral=True,
+        )
+
     @app_commands.command(name="audit_setup", description="Создать категорию и каналы для аудита")
     @app_commands.describe(category_name="Название категории аудита")
     @app_commands.checks.has_permissions(administrator=True)
