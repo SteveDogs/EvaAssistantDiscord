@@ -53,6 +53,7 @@ class EvaSharedState:
     _chat_banter_last_channel_reply: dict[tuple[int, int], datetime] = field(default_factory=dict)
     _chat_banter_last_user_reply: dict[tuple[int, int], datetime] = field(default_factory=dict)
     _chat_banter_last_channel_text: dict[tuple[int, int], str] = field(default_factory=dict)
+    _quarantined_message_ids: set[int] = field(default_factory=set)
     _special_dm_last_sent_at: dict[tuple[int, str], datetime] = field(default_factory=dict)
     _protected_voice_guard_recent: dict[tuple[int, int, int, int | None], datetime] = field(default_factory=dict)
     _protected_ban_startup_check_done: bool = False

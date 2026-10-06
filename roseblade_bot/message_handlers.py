@@ -18,6 +18,7 @@ from roseblade_bot.formatters import (
     _format_message_content,
     _format_reference,
 )
+from roseblade_bot.message_quarantine import maybe_quarantine_message
 
 if TYPE_CHECKING:
     from roseblade_bot.bot import AuditCog
@@ -38,6 +39,9 @@ def _related_channels(
 
 
 async def handle_on_message(cog: AuditCog, message: discord.Message) -> None:
+    if await maybe_quarantine_message(cog, message):
+        return
+
     if await cog.steam_profile_watch.maybe_handle_message(cog, message):
         return
 
@@ -71,6 +75,9 @@ async def handle_on_message(cog: AuditCog, message: discord.Message) -> None:
 
 
 async def handle_on_message_delete(cog: AuditCog, message: discord.Message) -> None:
+    if message.id in cog._quarantined_message_ids:
+        cog._quarantined_message_ids.discard(message.id)
+        return
     if message.guild is None or message.author.bot:
         return
     if isinstance(message.channel, (discord.TextChannel, discord.Thread)) and cog.is_ignored_channel(
@@ -130,6 +137,9 @@ async def handle_on_message_delete(cog: AuditCog, message: discord.Message) -> N
 
 
 async def handle_on_raw_message_delete(cog: AuditCog, payload: discord.RawMessageDeleteEvent) -> None:
+    if payload.message_id in cog._quarantined_message_ids:
+        cog._quarantined_message_ids.discard(payload.message_id)
+        return
     if payload.cached_message is not None or payload.guild_id is None:
         return
     guild = cog.bot.get_guild(payload.guild_id)

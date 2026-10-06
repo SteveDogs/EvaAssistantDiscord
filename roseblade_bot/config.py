@@ -86,6 +86,13 @@ class ChatBanterConfig:
 
 
 @dataclass(slots=True)
+class MessageQuarantineConfig:
+    enabled: bool
+    user_ids: frozenset[int]
+    warning_delete_seconds: int
+
+
+@dataclass(slots=True)
 class SpecialDmConfig:
     enabled: bool
     user_ids: frozenset[int]
@@ -242,6 +249,9 @@ _LEGACY_ALIASES = {
     "chat_banter_reply_chance": "chat_banter.reply_chance",
     "chat_banter_channel_cooldown_seconds": "chat_banter.channel_cooldown_seconds",
     "chat_banter_user_cooldown_seconds": "chat_banter.user_cooldown_seconds",
+    "message_quarantine_enabled": "message_quarantine.enabled",
+    "message_quarantine_user_ids": "message_quarantine.user_ids",
+    "message_quarantine_warning_delete_seconds": "message_quarantine.warning_delete_seconds",
     "special_dm_enabled": "special_dm.enabled",
     "special_dm_user_ids": "special_dm.user_ids",
     "special_dm_events": "special_dm.events",
@@ -338,6 +348,7 @@ class BotConfig:
     nickname_prefix: NicknamePrefixConfig
     protection: ProtectionConfig
     chat_banter: ChatBanterConfig
+    message_quarantine: MessageQuarantineConfig
     special_dm: SpecialDmConfig
     pubg: PubgConfig
     pubg_news: PubgNewsConfig
@@ -541,6 +552,11 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
         channel_cooldown_seconds=max(0, _parse_int_env("CHAT_BANTER_CHANNEL_COOLDOWN_SECONDS", default=120)),
         user_cooldown_seconds=max(0, _parse_int_env("CHAT_BANTER_USER_COOLDOWN_SECONDS", default=300)),
     )
+    message_quarantine_config = MessageQuarantineConfig(
+        enabled=_parse_bool_env("MESSAGE_QUARANTINE_ENABLED", default=False),
+        user_ids=_parse_id_set_env("MESSAGE_QUARANTINE_USER_IDS"),
+        warning_delete_seconds=max(0, min(120, _parse_int_env("MESSAGE_QUARANTINE_WARNING_DELETE_SECONDS", default=12))),
+    )
     special_dm_config = SpecialDmConfig(
         enabled=_parse_bool_env("SPECIAL_DM_ENABLED", default=False),
         user_ids=_parse_id_set_env("SPECIAL_DM_USER_IDS"),
@@ -659,6 +675,7 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
         nickname_prefix=nickname_prefix_config,
         protection=protection_config,
         chat_banter=chat_banter_config,
+        message_quarantine=message_quarantine_config,
         special_dm=special_dm_config,
         pubg=pubg_config,
         pubg_news=pubg_news_config,
