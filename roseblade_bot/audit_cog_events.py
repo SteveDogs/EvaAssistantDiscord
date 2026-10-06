@@ -42,7 +42,11 @@ class AuditCogEventsMixin:
 
         action = entry.action
         action_value = getattr(action, "value", None)
-        target = entry.target
+        try:
+            target = entry.target
+        except (AttributeError, TypeError):
+            # Discord occasionally emits channel-related audit entries without a target ID.
+            target = None
 
         # Compare by raw audit action value to avoid enum alias inconsistencies across discord.py builds.
         if action_value == 20:

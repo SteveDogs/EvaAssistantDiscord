@@ -90,6 +90,8 @@ class MessageQuarantineConfig:
     enabled: bool
     user_ids: frozenset[int]
     warning_delete_seconds: int
+    warning_cooldown_seconds: int
+    delete_interval_seconds: float
 
 
 @dataclass(slots=True)
@@ -252,6 +254,8 @@ _LEGACY_ALIASES = {
     "message_quarantine_enabled": "message_quarantine.enabled",
     "message_quarantine_user_ids": "message_quarantine.user_ids",
     "message_quarantine_warning_delete_seconds": "message_quarantine.warning_delete_seconds",
+    "message_quarantine_warning_cooldown_seconds": "message_quarantine.warning_cooldown_seconds",
+    "message_quarantine_delete_interval_seconds": "message_quarantine.delete_interval_seconds",
     "special_dm_enabled": "special_dm.enabled",
     "special_dm_user_ids": "special_dm.user_ids",
     "special_dm_events": "special_dm.events",
@@ -556,6 +560,8 @@ def load_config(base_dir: Path | None = None) -> BotConfig:
         enabled=_parse_bool_env("MESSAGE_QUARANTINE_ENABLED", default=False),
         user_ids=_parse_id_set_env("MESSAGE_QUARANTINE_USER_IDS"),
         warning_delete_seconds=max(0, min(120, _parse_int_env("MESSAGE_QUARANTINE_WARNING_DELETE_SECONDS", default=12))),
+        warning_cooldown_seconds=max(5, min(300, _parse_int_env("MESSAGE_QUARANTINE_WARNING_COOLDOWN_SECONDS", default=30))),
+        delete_interval_seconds=max(0.5, min(5.0, _parse_float_env("MESSAGE_QUARANTINE_DELETE_INTERVAL_SECONDS", default=1.0))),
     )
     special_dm_config = SpecialDmConfig(
         enabled=_parse_bool_env("SPECIAL_DM_ENABLED", default=False),

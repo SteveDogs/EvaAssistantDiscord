@@ -76,7 +76,6 @@ async def handle_on_message(cog: AuditCog, message: discord.Message) -> None:
 
 async def handle_on_message_delete(cog: AuditCog, message: discord.Message) -> None:
     if message.id in cog._quarantined_message_ids:
-        cog._quarantined_message_ids.discard(message.id)
         return
     if message.guild is None or message.author.bot:
         return
@@ -138,7 +137,6 @@ async def handle_on_message_delete(cog: AuditCog, message: discord.Message) -> N
 
 async def handle_on_raw_message_delete(cog: AuditCog, payload: discord.RawMessageDeleteEvent) -> None:
     if payload.message_id in cog._quarantined_message_ids:
-        cog._quarantined_message_ids.discard(payload.message_id)
         return
     if payload.cached_message is not None or payload.guild_id is None:
         return

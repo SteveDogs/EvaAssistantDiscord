@@ -5,6 +5,7 @@ Copyright (c) 2026 Steve Dogs Studio.
 
 from __future__ import annotations
 
+import asyncio
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -54,6 +55,8 @@ class EvaSharedState:
     _chat_banter_last_user_reply: dict[tuple[int, int], datetime] = field(default_factory=dict)
     _chat_banter_last_channel_text: dict[tuple[int, int], str] = field(default_factory=dict)
     _quarantined_message_ids: set[int] = field(default_factory=set)
+    _message_quarantine_locks: dict[tuple[int, int], asyncio.Lock] = field(default_factory=dict)
+    _message_quarantine_last_warning: dict[tuple[int, int], datetime] = field(default_factory=dict)
     _special_dm_last_sent_at: dict[tuple[int, str], datetime] = field(default_factory=dict)
     _protected_voice_guard_recent: dict[tuple[int, int, int, int | None], datetime] = field(default_factory=dict)
     _protected_ban_startup_check_done: bool = False
