@@ -12,3 +12,5 @@ tmp/
 .env
 crypto_tracker/data/
 crypto_tracker/__pycache__/
+# Personal project handoff: keep this workstation-only, never publish it.
+docs/PROJECT_HANDOFF_RU.md
